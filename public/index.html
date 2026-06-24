@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Demo Gym — Management System</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<script>
+  tailwind.config = {
+    theme: { extend: {
+      colors: { accent: { DEFAULT: '#185fa5', hover: '#13497e', soft: '#eaf1f8' }, ink: '#111827', sub: '#6b7280', line: '#e5e7eb', panel: '#f9fafb' },
+      fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'] }
+    } }
+  };
+</script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #111827; background: #f3f4f6; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  table.dense td, table.dense th { font-size: 13px; }
+  .nav-item { transition: background .12s ease, color .12s ease; }
+  .row-hover:hover { background: #f9fafb; }
+  .slideover-panel { transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; background-clip: padding-box; }
+  thead.sticky th { position: sticky; top: 0; z-index: 5; }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid #185fa5; outline-offset: 1px; }
+  .scan-pulse { animation: scanpulse 1.6s ease-in-out infinite; }
+  @keyframes scanpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(24,95,165,.20); } 50% { box-shadow: 0 0 0 16px rgba(24,95,165,0); } }
+  .flash-ok { animation: flashok .6s ease; } @keyframes flashok { 0% { background:#dcfce7; } 100% { background:#fff; } }
+  .flash-bad { animation: flashbad .6s ease; } @keyframes flashbad { 0% { background:#fee2e2; } 100% { background:#fff; } }
+  #print-area { display: none; }
+  @media print { body * { visibility: hidden !important; } #print-area, #print-area * { visibility: visible !important; } #print-area { display:block !important; position:absolute; left:0; top:0; width:100%; } .no-print { display:none !important; } }
+</style>
+</head>
+<body class="text-ink">
+  <div id="app" class="flex h-screen overflow-hidden">
+    <div class="m-auto text-center text-sub"><div class="text-sm">Loading Demo Gym…</div></div>
+  </div>
+
+  <div id="slideover" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/30" onclick="closeSlide()"></div>
+    <div id="slideover-panel" class="slideover-panel absolute right-0 top-0 h-full w-full max-w-[640px] translate-x-full bg-white shadow-2xl flex flex-col"></div>
+  </div>
+  <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-6">
+    <div class="absolute inset-0 bg-black/40" onclick="closeModal()"></div>
+    <div id="modal-card" class="relative z-10 max-h-[90vh] overflow-auto"></div>
+  </div>
+  <div id="toast" class="fixed bottom-6 right-6 z-[60] hidden">
+    <div class="flex items-center gap-2 rounded-lg bg-ink px-4 py-3 text-sm text-white shadow-lg">
+      <i data-lucide="check-circle-2" class="h-4 w-4 text-green-400"></i><span id="toast-msg">Done</span>
+    </div>
+  </div>
+  <div id="print-area"></div>
+  <input type="file" id="restore-input" accept=".db,application/octet-stream,application/x-sqlite3" class="hidden" onchange="restoreBackup(this)" />
+
+<script>
+/* ============================================================================
+   DEMO GYM — frontend. Same UI as the approved demo, now backed by the local
+   server (Express + SQLite) and the ZK9500 fingerprint service.
+   Data is loaded from /api/bootstrap; every change is persisted via the API.
+   ========================================================================== */
+
+/* ---- runtime config (filled by bootstrap) ---- */
+let GYM = {}, TIERS = {}, POLICY = { cycleDays: 30, dueSoonDays: 5 };
+let TODAY = new Date();
+let VERSION = '1.0.0';
+let fpStatus = { mode: 'simulation', device: '', samplesRequired: 3 };
+let ENROLL_SAMPLES = 3;
+
+let members = [], payments = [], expenses = [], staff = [], users = [], checkins = [];
+
+const TIER_NAMES = ['Basic', 'Premium', 'Student', 'Family'];
+const METHODS = ['Cash', 'Card', 'Easypaisa', 'JazzCash'];
+
+/* ---- small date / format helpers ---- */
+const DAY = 86400000;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const pad = (n) => String(n).padStart(2, '0');
+const addDays = (d, n) => new Date(d.getTime() + n * DAY);
+const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a, b) => Math.round((stripTime(b) - stripTime(a)) / DAY);
+function fmtDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function fmtDateLong(d) { return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+function fmtMonth(d) { return MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+function fmtTime(d) { let h = d.getHours(), m = d.getMinutes(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + pad(m) + ' ' + ap; }
+function pkr(n) { return 'PKR ' + Math.round(n).toLocaleString('en-US'); }
+function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+function initials(name) { const p = name.trim().split(/\s+/); return ((p[0]?.[0] || '') + (p[1]?.[0] || p[0]?.[1] || '')).toUpperCase(); }
+function avatarColor(seed) {
+  const c = ['#185fa5','#0f766e','#7c3aed','#b45309','#be123c','#1d4ed8','#15803d','#a16207','#9333ea','#0e7490'];
+  let h = 0; for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0; return c[Math.abs(h) % c.length];
+}
+function dOnly(s) { if (!s) return null; const p = String(s).slice(0, 10).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12, 0, 0); }
+function dTime(s) { return s ? new Date(s) : null; }
+
+/* ---- derived ---- */
+function statusOf(m) {
+  if (!m.lastPayment) return 'Not enrolled';
+  if (m.suspended) return 'Suspended';
+  const due = addDays(m.lastPayment, POLICY.cycleDays);
+  const dleft = daysBetween(TODAY, due);
+  if (dleft < 0) return 'Overdue';
+  if (dleft <= POLICY.dueSoonDays) return 'Due soon';
+  return 'Paid';
+}
+function dueDateOf(m) { return m.lastPayment ? addDays(m.lastPayment, POLICY.cycleDays) : null; }
+function daysOverdue(m) { const due = dueDateOf(m); return due ? Math.max(0, daysBetween(due, TODAY)) : 0; }
+
+const STATUS_STYLE = { 'Paid':'bg-green-100 text-green-800','Due soon':'bg-amber-100 text-amber-800','Overdue':'bg-red-100 text-red-700','Not enrolled':'bg-gray-100 text-gray-600','Suspended':'bg-gray-200 text-gray-700' };
+function pill(s) { return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ' + (STATUS_STYLE[s] || 'bg-gray-100 text-gray-600') + '">' + s + '</span>'; }
+const CAT_STYLE = { 'Rent':'bg-indigo-50 text-indigo-700','Salaries':'bg-blue-50 text-blue-700','Utilities':'bg-cyan-50 text-cyan-700','Equipment':'bg-violet-50 text-violet-700','Supplies':'bg-teal-50 text-teal-700','Marketing':'bg-amber-50 text-amber-700','Maintenance':'bg-orange-50 text-orange-700','Other':'bg-gray-100 text-gray-600' };
+function catTag(c) { return '<span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ' + (CAT_STYLE[c] || 'bg-gray-100 text-gray-600') + '">' + c + '</span>'; }
+function avatar(name, size) { size = size || 28; const fs = Math.round(size * 0.4); return '<span class="inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white" style="width:' + size + 'px;height:' + size + 'px;font-size:' + fs + 'px;background:' + avatarColor(name) + '">' + initials(name) + '</span>'; }
+
+function collectedToday() { return payments.filter(p => daysBetween(p.date, TODAY) === 0).reduce((t, p) => t + p.amount, 0); }
+function checkinsOn(d) { return checkins.filter(c => daysBetween(c.at, d) === 0).length; }
+function activeMemberCount() { return members.filter(m => !m.suspended && m.lastPayment).length; }
+function joinedThisMonth() { return members.filter(m => m.joinDate.getMonth() === TODAY.getMonth() && m.joinDate.getFullYear() === TODAY.getFullYear()).length; }
+function outstandingTotal() {
+  return members.reduce((t, m) => { const s = statusOf(m);
+    if (s === 'Overdue') return t + TIERS[m.type] * Math.min(6, Math.ceil(daysOverdue(m) / 30));
+    if (s === 'Due soon') return t + TIERS[m.type]; return t; }, 0);
+}
+function memberSpend(id) { return payments.filter(p => p.memberId === id).reduce((t, p) => t + p.amount, 0); }
+function memberVisits(id, days) { const since = addDays(TODAY, -days); return checkins.filter(c => c.memberId === id && c.at >= since).length; }
+function monthlySeries(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1); const key = monthKey(base);
+    const rev = payments.filter(p => monthKey(p.date) === key).reduce((t, p) => t + p.amount, 0);
+    const exp = expenses.filter(e => monthKey(e.date) === key).reduce((t, e) => t + e.amount, 0);
+    const paidCount = new Set(payments.filter(p => monthKey(p.date) === key).map(p => p.memberId)).size;
+    const payCount = payments.filter(p => monthKey(p.date) === key).length;
+    out.push({ label: MONTHS[base.getMonth()] + ' ' + String(base.getFullYear()).slice(2), date: base, rev, exp, paidCount, payCount });
+  }
+  return out;
+}
+function dailyCheckinSeries(n) { const out = []; for (let i = n - 1; i >= 0; i--) { const d = addDays(TODAY, -i); out.push({ d, count: checkinsOn(d) }); } return out; }
+function dailyCollectionSeries(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) { const d = addDays(TODAY, -i); const bm = {}; METHODS.forEach(m => bm[m] = 0);
+    payments.filter(p => daysBetween(p.date, d) === 0).forEach(p => bm[p.method] += p.amount);
+    out.push({ d, byMethod: bm, total: Object.values(bm).reduce((a, b) => a + b, 0) }); }
+  return out;
+}
+
+/* ---- API helper ---- */
+async function api(path, opts) {
+  opts = opts || {};
+  const o = { method: opts.method || 'GET', headers: {} };
+  if (opts.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opts.body); }
+  const r = await fetch('/api' + path, o);
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('application/json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+  return data;
+}
+function reviveMember(m) { m.joinDate = dOnly(m.joinDate); m.lastPayment = dOnly(m.lastPayment); m.fingerprintEnrolledAt = dOnly(m.fingerprintEnrolledAt); return m; }
+function revivePayment(p) { p.date = dOnly(p.date); return p; }
+function reviveExpense(e) { e.date = dOnly(e.date); return e; }
+function reviveCheckin(c) { c.at = dTime(c.at); return c; }
+
+async function loadBootstrap() {
+  const b = await api('/bootstrap');
+  GYM = b.settings.gym; TIERS = b.settings.tiers; POLICY = b.settings.policy; VERSION = b.settings.version;
+  TODAY = dOnly(b.today);
+  fpStatus = b.fingerprint; ENROLL_SAMPLES = fpStatus.samplesRequired || 3;
+  members = b.members.map(reviveMember);
+  payments = b.payments.map(revivePayment);
+  expenses = b.expenses.map(reviveExpense);
+  staff = b.staff;
+  users = b.users;
+  checkins = b.checkins.map(reviveCheckin);
+  document.title = (GYM.name || 'Demo Gym') + ' — Management System';
+}
+
+/* ---- state + nav ---- */
+const state = { role: 'Owner', page: 'dashboard', userMenuOpen: false, memberSearch: '', memberFilter: 'All', payMethod: 'All', paySearch: '', payFrom: '', payTo: '', expCat: 'All', expFrom: '', expTo: '', lastBackup: new Date(Date.now() - 2 * 3600 * 1000) };
+const ROLE_USER = { Owner: 'Faisal Tariq', Receptionist: 'Sana Khan' };
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', roles: ['Owner', 'Receptionist'] },
+  { id: 'scan', label: 'Scan', icon: 'fingerprint', roles: ['Owner', 'Receptionist'] },
+  { id: 'members', label: 'Members', icon: 'users', roles: ['Owner', 'Receptionist'] },
+  { id: 'payments', label: 'Payments', icon: 'wallet', roles: ['Owner', 'Receptionist'] },
+  { id: 'expenses', label: 'Expenses', icon: 'receipt', roles: ['Owner'] },
+  { id: 'reports', label: 'Reports', icon: 'bar-chart-3', roles: ['Owner'] },
+  { id: 'staff', label: 'Staff', icon: 'id-card', roles: ['Owner'] },
+  { id: 'settings', label: 'Settings', icon: 'settings', roles: ['Owner'] }
+];
+function canSee(p) { const n = NAV.find(x => x.id === p); return n && n.roles.includes(state.role); }
+const PAGES = {};
+function go(p) { if (!canSee(p)) p = 'dashboard'; state.page = p; state.userMenuOpen = false; render(); }
+function setRole(r) { state.role = r; state.userMenuOpen = false; if (!canSee(state.page)) state.page = 'dashboard'; render(); }
+function toggleUserMenu() { state.userMenuOpen = !state.userMenuOpen; render(); }
+
+/* ---- render root ---- */
+function render() {
+  const nav = NAV.filter(n => n.roles.includes(state.role));
+  const pageTitle = (NAV.find(n => n.id === state.page) || {}).label || '';
+  const sidebar = `
+    <nav class="flex w-[240px] shrink-0 flex-col border-r border-line bg-white">
+      <div class="flex items-center gap-2.5 px-5 h-16 border-b border-line">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white font-bold">${(GYM.name || 'D').trim().charAt(0).toUpperCase()}</span>
+        <div class="leading-tight"><div class="text-[15px] font-semibold">${GYM.name || 'Demo Gym'}</div><div class="text-[11px] text-sub">${GYM.city || ''}</div></div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
+        ${nav.map(n => `<button onclick="go('${n.id}')" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium ${state.page === n.id ? 'bg-accent-soft text-accent' : 'text-gray-700 hover:bg-gray-100'}"><i data-lucide="${n.icon}" class="h-[18px] w-[18px]"></i>${n.label}</button>`).join('')}
+      </div>
+      <div class="border-t border-line p-3 text-[11px] text-sub">
+        <div class="flex items-center gap-1.5">${fpStatus.mode === 'device' ? '<i data-lucide="fingerprint" class="h-3.5 w-3.5 text-green-600"></i> Scanner connected' : '<i data-lucide="shield-check" class="h-3.5 w-3.5"></i> Local secure mode'}</div>
+        <div class="mt-1">Last backup: ${lastBackupText()}</div>
+      </div>
+    </nav>`;
+  const header = `
+    <header class="flex h-16 shrink-0 items-center justify-between border-b border-line bg-white px-6">
+      <div><h1 class="text-lg font-semibold leading-none">${pageTitle}</h1><p class="mt-1 text-[12px] text-sub">${fmtDateLong(TODAY)}</p></div>
+      <div class="relative">
+        <button onclick="toggleUserMenu()" class="flex items-center gap-2.5 rounded-lg border border-line px-2.5 py-1.5 text-sm hover:bg-gray-50">
+          ${avatar(ROLE_USER[state.role], 28)}
+          <span class="text-left leading-tight"><span class="block text-[12px] text-sub">${state.role}</span><span class="block font-medium">${ROLE_USER[state.role]}</span></span>
+          <i data-lucide="chevron-down" class="h-4 w-4 text-sub"></i>
+        </button>
+        ${state.userMenuOpen ? `<div class="absolute right-0 mt-1 w-60 rounded-lg border border-line bg-white p-1.5 shadow-lg z-20">
+          <div class="px-2 py-1 text-[11px] uppercase tracking-wide text-sub">Switch role</div>
+          ${['Owner','Receptionist'].map(r => `<button onclick="setRole('${r}')" class="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-gray-100"><span class="flex items-center gap-2">${avatar(ROLE_USER[r], 24)} <span><span class="block font-medium">${ROLE_USER[r]}</span><span class="block text-[11px] text-sub">${r}</span></span></span>${state.role === r ? '<i data-lucide="check" class="h-4 w-4 text-accent"></i>' : ''}</button>`).join('')}
+        </div>` : ''}
+      </div>
+    </header>`;
+  document.getElementById('app').innerHTML = `${sidebar}<main class="flex flex-1 flex-col overflow-hidden">${header}<div id="page" class="flex-1 overflow-y-auto bg-panel p-6"></div></main>`;
+  const page = PAGES[state.page] || PAGES.dashboard;
+  document.getElementById('page').innerHTML = page.render();
+  if (typeof page.mount === 'function') page.mount();
+  if (window.lucide) lucide.createIcons();
+}
+function kpiCard(label, value, sub, subColor) { return `<div class="rounded-xl border border-line bg-white p-5"><div class="text-[12px] font-medium text-sub">${label}</div><div class="mt-2 text-[26px] font-semibold leading-none">${value}</div>${sub ? `<div class="mt-2 text-[12px] font-medium ${subColor || 'text-sub'}">${sub}</div>` : ''}</div>`; }
+function emptyState(icon, text) { return `<div class="flex flex-col items-center justify-center py-12 text-center text-sub"><i data-lucide="${icon}" class="h-8 w-8 mb-2 opacity-50"></i><div class="text-sm">${text}</div></div>`; }
+function card(title, body, action) { return `<section class="rounded-xl border border-line bg-white"><div class="flex items-center justify-between border-b border-line px-5 py-3"><h2 class="text-sm font-semibold">${title}</h2>${action || ''}</div><div class="p-5">${body}</div></section>`; }
+
+/* ============================ PAGES ============================ */
+/* ---- Dashboard ---- */
+PAGES.dashboard = {
+  render() {
+    const owner = state.role === 'Owner';
+    const kpis = [
+      kpiCard('Members active', activeMemberCount(), '+' + joinedThisMonth() + ' this month', 'text-green-600'),
+      kpiCard("Today's check-ins", checkinsOn(TODAY), 'Updated live', 'text-sub')
+    ];
+    if (owner) {
+      kpis.push(kpiCard('Collected today', pkr(collectedToday()), 'Across all methods', 'text-sub'));
+      kpis.push(kpiCard('Outstanding fees', pkr(outstandingTotal()), members.filter(m => statusOf(m) === 'Overdue').length + ' members overdue', 'text-red-600'));
+    }
+    const recent = checkins.slice(0, 8).map(c => { const m = members.find(x => x.id === c.memberId);
+      return `<tr class="row-hover border-b border-line last:border-0"><td class="py-2.5 pr-3 text-sub whitespace-nowrap">${fmtTime(c.at)}</td><td class="py-2.5 pr-3"><span class="flex items-center gap-2">${avatar(c.memberName, 24)}<span class="font-medium">${c.memberName}</span></span></td><td class="py-2.5 text-right">${pill(m ? statusOf(m) : 'Paid')}</td></tr>`; }).join('');
+    const overdue = members.filter(m => statusOf(m) === 'Overdue').sort((a, b) => daysOverdue(b) - daysOverdue(a)).slice(0, 8)
+      .map(m => `<tr class="row-hover cursor-pointer border-b border-line last:border-0" onclick="openMember('${m.id}')"><td class="py-2.5 pr-3"><span class="flex items-center gap-2">${avatar(m.name, 24)}<span class="font-medium">${m.name}</span></span></td><td class="py-2.5 pr-3 text-sub">${m.id}</td><td class="py-2.5 pr-3 text-right text-red-600 font-medium">${daysOverdue(m)} days</td><td class="py-2.5 text-right">${pkr(TIERS[m.type] * Math.min(6, Math.ceil(daysOverdue(m) / 30)))}</td></tr>`).join('');
+    let html = `<div class="grid gap-4 ${owner ? 'grid-cols-4' : 'grid-cols-2 max-w-2xl'}">${kpis.join('')}</div>`;
+    html += `<div class="mt-4 grid gap-4 ${owner ? 'grid-cols-2' : 'grid-cols-1'}">${card('Daily check-ins · last 30 days', '<div style="height:260px"><canvas id="chk-chart"></canvas></div>')}${owner ? card('Revenue vs expenses · last 6 months', '<div style="height:260px"><canvas id="rev-chart"></canvas></div>') : ''}</div>`;
+    html += `<div class="mt-4 grid gap-4 ${owner ? 'grid-cols-2' : 'grid-cols-1 max-w-3xl'}">${card('Recent check-ins', `<table class="w-full text-left dense"><tbody>${recent || ''}</tbody></table>` + (recent ? '' : emptyState('scan-line', 'No check-ins yet today')))}${owner ? card('Overdue members', overdue ? `<table class="w-full text-left dense"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-2 font-medium">Member</th><th class="pb-2 font-medium">ID</th><th class="pb-2 font-medium text-right">Overdue</th><th class="pb-2 font-medium text-right">Owed</th></tr></thead><tbody>${overdue}</tbody></table>` : emptyState('check-circle-2', 'No overdue members')) : ''}</div>`;
+    return html;
+  },
+  mount() {
+    const chk = dailyCheckinSeries(30);
+    chart('chk-chart', { type: 'line', data: { labels: chk.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: [{ label: 'Check-ins', data: chk.map(x => x.count), borderColor: '#185fa5', backgroundColor: 'rgba(24,95,165,.10)', fill: true, tension: .35, pointRadius: 0, borderWidth: 2 }] }, options: lineOpts() });
+    if (state.role === 'Owner') { const ms = monthlySeries(6);
+      chart('rev-chart', { type: 'bar', data: { labels: ms.map(x => x.label), datasets: [{ label: 'Revenue', data: ms.map(x => x.rev), backgroundColor: '#16a34a', borderRadius: 4 }, { label: 'Expenses', data: ms.map(x => x.exp), backgroundColor: '#d97706', borderRadius: 4 }] }, options: barOpts(true) }); }
+  }
+};
+
+/* ---- Scan ---- */
+let scanState = { member: null, mode: null };
+PAGES.scan = {
+  render() {
+    return `<div class="mx-auto max-w-2xl">
+      <div id="scan-card" class="rounded-2xl border border-line bg-white p-10 text-center">${scanInner()}</div>
+      <div class="mt-5 grid grid-cols-3 gap-3">
+        <button onclick="simulateScan('paid')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — paid member</button>
+        <button onclick="simulateScan('overdue')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — overdue member</button>
+        <button onclick="simulateScan('unknown')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — unknown</button>
+      </div>
+      <div class="mt-3 text-center text-[12px] text-sub">${fpStatus.mode === 'device' ? 'ZK9500 connected — place a finger on the reader to check in automatically.' : 'Simulation mode (no scanner detected). Use the buttons above, or connect a ZK9500 and restart.'}</div>
+      <div class="mt-5 rounded-xl border border-line bg-white p-4">
+        <div class="text-[12px] font-medium text-sub mb-2">Manual lookup</div>
+        <div class="flex gap-2"><input id="manual-id" placeholder="Enter member ID, e.g. A012" class="flex-1 rounded-lg border border-line px-3 py-2 text-sm" onkeydown="if(event.key==='Enter')manualLookup()" /><button onclick="manualLookup()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Look up</button></div>
+      </div>
+    </div>`;
+  },
+  mount() {}
+};
+function scanInner() {
+  if (scanState.mode === 'reading') return `<div class="scan-pulse mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft"><i data-lucide="fingerprint" class="h-14 w-14 text-accent"></i></div><div class="mt-6 text-lg font-semibold">Reading…</div><div class="mt-1 text-sm text-sub">Hold finger steady on the scanner</div>`;
+  if (scanState.mode === 'unknown') return `<div class="mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-red-50"><i data-lucide="user-x" class="h-14 w-14 text-red-500"></i></div><div class="mt-6 text-lg font-semibold">No match found</div><div class="mt-1 text-sm text-sub">Fingerprint not recognised. Try again or use manual lookup.</div>`;
+  if (scanState.member) {
+    const m = scanState.member, s = statusOf(m), due = dueDateOf(m);
+    const sinceTxt = m.lastPayment ? daysBetween(m.lastPayment, TODAY) + ' days ago' : '—';
+    return `<div class="flex items-center gap-5 text-left">${avatar(m.name, 80)}<div class="flex-1"><div class="text-[12px] text-sub">${m.id} · ${m.type}</div><div class="text-2xl font-semibold">${m.name}</div><div class="mt-1 text-sm text-sub">Last payment: ${m.lastPayment ? fmtDateLong(m.lastPayment) : '—'} (${sinceTxt})</div><div class="text-sm text-sub">Due date: ${due ? fmtDateLong(due) : '—'}</div></div><div class="text-right">${bigPill(s)}</div></div>${(s === 'Overdue' || s === 'Due soon') ? `<div class="mt-6 text-left"><button onclick="scanMarkPaid()" class="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Mark payment received</button></div>` : ''}`;
+  }
+  return `<div class="${fpStatus.mode === 'device' ? 'scan-pulse ' : ''}mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft"><i data-lucide="fingerprint" class="h-14 w-14 text-accent"></i></div><div class="mt-6 text-lg font-semibold">Place finger on scanner</div><div class="mt-1 text-sm text-sub">Or use one of the demo buttons below to simulate a scan.</div>`;
+}
+function bigPill(s) { const map = { 'Paid':'bg-green-100 text-green-800','Due soon':'bg-amber-100 text-amber-800','Overdue':'bg-red-100 text-red-700','Not enrolled':'bg-gray-100 text-gray-600','Suspended':'bg-gray-200 text-gray-700' }; return `<span class="inline-flex rounded-lg px-4 py-2 text-base font-bold uppercase tracking-wide ${map[s] || ''}">${s}</span>`; }
+async function simulateScan(kind) {
+  scanState = { member: null, mode: 'reading' }; refreshScan();
+  try {
+    const r = await api('/fingerprint/simulate', { method: 'POST', body: { kind } });
+    if (r.none) { scanState = { mode: 'unknown' }; ding(false); }
+    else { const m = reviveMember(r.member); upsertMember(m); if (r.checkin) { checkins.unshift(reviveCheckin(r.checkin)); } scanState = { member: m, mode: 'member' }; ding(statusOf(m) === 'Paid'); }
+  } catch (e) { scanState = { mode: 'unknown' }; ding(false); }
+  refreshScan();
+}
+function manualLookup() {
+  const v = (document.getElementById('manual-id').value || '').trim().toUpperCase();
+  const m = members.find(x => x.id === v);
+  if (!m) { scanState = { mode: 'unknown' }; ding(false); } else { scanState = { member: m, mode: 'member' }; ding(statusOf(m) === 'Paid'); }
+  refreshScan();
+}
+async function scanMarkPaid() { const m = scanState.member; if (!m) return; await recordPaymentFor(m, TIERS[m.type], 'Cash', 'Front-desk scan payment'); scanState.member = members.find(x => x.id === m.id); refreshScan(); }
+function refreshScan() { const el = document.getElementById('scan-card'); if (!el) return; el.innerHTML = scanInner(); el.classList.remove('flash-ok', 'flash-bad'); if (window.lucide) lucide.createIcons(); }
+function ding(ok) {
+  const el = document.getElementById('scan-card'); if (el) { void el.offsetWidth; el.classList.add(ok ? 'flash-ok' : 'flash-bad'); }
+  try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = ok ? 880 : 220; o.type = 'sine'; g.gain.setValueAtTime(.06, ctx.currentTime); g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + .25); o.start(); o.stop(ctx.currentTime + .25); } catch (e) {}
+}
+
+/* ---- Members ---- */
+PAGES.members = {
+  render() {
+    return `
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <div class="relative"><i data-lucide="search" class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-sub"></i><input id="mem-search" value="${state.memberSearch}" oninput="onMemberSearch(this.value)" placeholder="Search name or ID" class="w-72 rounded-lg border border-line py-2 pl-9 pr-3 text-sm" /></div>
+          <select onchange="onMemberFilter(this.value)" class="rounded-lg border border-line px-3 py-2 text-sm">${['All','Overdue','Due soon','Paid','Not enrolled'].map(f => `<option ${state.memberFilter === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
+        </div>
+        <button onclick="openAddMember()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Add new member</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-230px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr>
+          <th class="px-4 py-3 font-medium">Member</th><th class="px-4 py-3 font-medium">ID</th><th class="px-4 py-3 font-medium">Phone</th><th class="px-4 py-3 font-medium">Type</th><th class="px-4 py-3 font-medium">Last payment</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium text-right">Actions</th>
+        </tr></thead><tbody id="mem-tbody">${membersRows()}</tbody></table><div id="mem-empty"></div>
+      </div></div>
+      <div id="mem-count" class="mt-2 text-[12px] text-sub">${filteredMembers().length} members</div>`;
+  },
+  mount() { renderMembersEmpty(); }
+};
+function filteredMembers() {
+  const q = state.memberSearch.trim().toLowerCase();
+  return members.filter(m => { if (state.memberFilter !== 'All' && statusOf(m) !== state.memberFilter) return false; if (q && !(m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))) return false; return true; });
+}
+function membersRows() {
+  return filteredMembers().map(m => `<tr class="row-hover cursor-pointer border-t border-line" onclick="openMember('${m.id}')">
+    <td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(m.name, 30)}<span class="font-medium">${m.name}</span></span></td>
+    <td class="px-4 py-2.5 text-sub">${m.id}</td><td class="px-4 py-2.5 text-sub">${m.phone}</td><td class="px-4 py-2.5">${m.type}</td>
+    <td class="px-4 py-2.5 text-sub">${m.lastPayment ? fmtDate(m.lastPayment) : '—'}</td><td class="px-4 py-2.5">${pill(statusOf(m))}</td>
+    <td class="px-4 py-2.5 text-right" onclick="event.stopPropagation()"><button onclick="openPaymentForm('${m.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">Record payment</button> <button onclick="openMember('${m.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">View</button></td></tr>`).join('');
+}
+function refreshMembersTable() { const tb = document.getElementById('mem-tbody'); if (!tb) return; tb.innerHTML = membersRows(); document.getElementById('mem-count').textContent = filteredMembers().length + ' members'; renderMembersEmpty(); if (window.lucide) lucide.createIcons(); }
+function renderMembersEmpty() { const e = document.getElementById('mem-empty'); if (!e) return; e.innerHTML = filteredMembers().length ? '' : emptyState('users', 'No members match this filter'); if (window.lucide) lucide.createIcons(); }
+function onMemberSearch(v) { state.memberSearch = v; refreshMembersTable(); }
+function onMemberFilter(v) { state.memberFilter = v; refreshMembersTable(); }
+
+/* ---- Payments ---- */
+PAGES.payments = {
+  render() {
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="date" value="${state.payFrom}" onchange="state.payFrom=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+          <span class="text-sub text-sm">to</span>
+          <input type="date" value="${state.payTo}" onchange="state.payTo=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+          <select onchange="state.payMethod=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm">${['All', ...METHODS].map(m => `<option ${state.payMethod === m ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <div class="relative"><i data-lucide="search" class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-sub"></i><input value="${state.paySearch}" oninput="state.paySearch=this.value;refreshPaymentsTable()" placeholder="Search member" class="w-56 rounded-lg border border-line py-2 pl-9 pr-3 text-sm" /></div>
+        </div>
+        <button onclick="openPaymentForm()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Record payment</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-230px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr>
+          <th class="px-4 py-3 font-medium">Date</th><th class="px-4 py-3 font-medium">Member</th><th class="px-4 py-3 font-medium text-right">Amount</th><th class="px-4 py-3 font-medium">Membership month</th><th class="px-4 py-3 font-medium">Method</th><th class="px-4 py-3 font-medium">Recorded by</th><th class="px-4 py-3 font-medium text-right">Receipt</th>
+        </tr></thead><tbody id="pay-tbody">${paymentsRows()}</tbody></table><div id="pay-empty"></div>
+      </div></div>
+      <div id="pay-count" class="mt-2 text-[12px] text-sub"></div>`;
+  },
+  mount() { refreshPaymentsTable(); }
+};
+function filteredPayments() {
+  const q = state.paySearch.trim().toLowerCase(); const from = state.payFrom ? new Date(state.payFrom) : null; const to = state.payTo ? new Date(state.payTo) : null;
+  return payments.filter(p => { if (state.payMethod !== 'All' && p.method !== state.payMethod) return false; if (q && !(p.memberName.toLowerCase().includes(q) || p.memberId.toLowerCase().includes(q))) return false; if (from && stripTime(p.date) < stripTime(from)) return false; if (to && stripTime(p.date) > stripTime(to)) return false; return true; });
+}
+function paymentsRows() {
+  return filteredPayments().map(p => `<tr class="row-hover border-t border-line"><td class="px-4 py-2.5 text-sub whitespace-nowrap">${fmtDate(p.date)}</td><td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(p.memberName, 28)}<span><span class="block font-medium">${p.memberName}</span><span class="block text-[11px] text-sub">${p.memberId}</span></span></span></td><td class="px-4 py-2.5 text-right font-medium">${pkr(p.amount)}</td><td class="px-4 py-2.5 text-sub">${p.month}</td><td class="px-4 py-2.5">${p.method}</td><td class="px-4 py-2.5 text-sub">${p.recordedBy}</td><td class="px-4 py-2.5 text-right"><button onclick="printReceipt('${p.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">Print receipt</button></td></tr>`).join('');
+}
+function refreshPaymentsTable() { const tb = document.getElementById('pay-tbody'); if (!tb) return; const rows = filteredPayments(); tb.innerHTML = paymentsRows(); document.getElementById('pay-count').textContent = rows.length + ' payments · ' + pkr(rows.reduce((t, p) => t + p.amount, 0)) + ' total'; document.getElementById('pay-empty').innerHTML = rows.length ? '' : emptyState('wallet', 'No payments match these filters'); if (window.lucide) lucide.createIcons(); }
+
+/* ---- Expenses ---- */
+PAGES.expenses = {
+  render() {
+    const thisM = monthSum(expenses, 0), lastM = monthSum(expenses, 1), ytd = ytdSum(expenses);
+    return `
+      <div class="grid grid-cols-3 gap-4">${kpiCard('This month', pkr(thisM), fmtMonth(TODAY), 'text-sub')}${kpiCard('Last month', pkr(lastM), fmtMonth(new Date(TODAY.getFullYear(), TODAY.getMonth() - 1, 1)), 'text-sub')}${kpiCard('Year to date', pkr(ytd), TODAY.getFullYear() + '', 'text-sub')}</div>
+      <div class="mt-4 flex items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <select onchange="state.expCat=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm">${['All','Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other'].map(c => `<option ${state.expCat === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          <input type="date" value="${state.expFrom}" onchange="state.expFrom=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm" /><span class="text-sub text-sm">to</span><input type="date" value="${state.expTo}" onchange="state.expTo=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+        </div>
+        <button onclick="openExpenseForm()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Record expense</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-330px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr><th class="px-4 py-3 font-medium">Date</th><th class="px-4 py-3 font-medium">Category</th><th class="px-4 py-3 font-medium">Description</th><th class="px-4 py-3 font-medium text-right">Amount</th><th class="px-4 py-3 font-medium">Recorded by</th></tr></thead><tbody id="exp-tbody">${expensesRows()}</tbody></table><div id="exp-empty"></div>
+      </div></div>
+      <div id="exp-count" class="mt-2 text-[12px] text-sub"></div>`;
+  },
+  mount() { refreshExpensesTable(); }
+};
+function monthSum(arr, monthsAgo) { const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - monthsAgo, 1); const key = monthKey(base); return arr.filter(x => monthKey(x.date) === key).reduce((t, x) => t + x.amount, 0); }
+function ytdSum(arr) { return arr.filter(x => x.date.getFullYear() === TODAY.getFullYear()).reduce((t, x) => t + x.amount, 0); }
+function filteredExpenses() { const from = state.expFrom ? new Date(state.expFrom) : null; const to = state.expTo ? new Date(state.expTo) : null; return expenses.filter(e => { if (state.expCat !== 'All' && e.category !== state.expCat) return false; if (from && stripTime(e.date) < stripTime(from)) return false; if (to && stripTime(e.date) > stripTime(to)) return false; return true; }); }
+function expensesRows() { return filteredExpenses().map(e => `<tr class="row-hover border-t border-line"><td class="px-4 py-2.5 text-sub whitespace-nowrap">${fmtDate(e.date)}</td><td class="px-4 py-2.5">${catTag(e.category)}</td><td class="px-4 py-2.5">${e.description}</td><td class="px-4 py-2.5 text-right font-medium">${pkr(e.amount)}</td><td class="px-4 py-2.5 text-sub">${e.recordedBy}</td></tr>`).join(''); }
+function refreshExpensesTable() { const tb = document.getElementById('exp-tbody'); if (!tb) return; const rows = filteredExpenses(); tb.innerHTML = expensesRows(); document.getElementById('exp-count').textContent = rows.length + ' expenses · ' + pkr(rows.reduce((t, e) => t + e.amount, 0)) + ' total'; document.getElementById('exp-empty').innerHTML = rows.length ? '' : emptyState('receipt', 'No expenses logged for this filter'); if (window.lucide) lucide.createIcons(); }
+
+/* ---- Reports ---- */
+const REPORTS = [
+  { id: 'attendance', icon: 'calendar-check', title: 'Daily attendance', desc: 'Check-ins per day over the last 30 days.' },
+  { id: 'collection', icon: 'banknote', title: 'Daily collection', desc: 'PKR collected per day by payment method.' },
+  { id: 'mrev', icon: 'trending-up', title: 'Monthly revenue', desc: 'Revenue by month with members paid and averages.' },
+  { id: 'mexp', icon: 'trending-down', title: 'Monthly expenses', desc: 'Expense totals by category, last 12 months.' },
+  { id: 'pnl', icon: 'scale', title: 'Monthly P&L', desc: 'Revenue vs expenses and net profit per month.' },
+  { id: 'lapsed', icon: 'user-minus', title: 'Lapsed members', desc: 'Members overdue more than 30 days, grouped.' },
+  { id: 'retention', icon: 'repeat', title: 'Member retention', desc: 'Join cohorts retained at 1, 3, 6, 12 months.' },
+  { id: 'topvisits', icon: 'activity', title: 'Top members by visits', desc: 'Top 20 by check-ins in the last 90 days.' },
+  { id: 'topspend', icon: 'crown', title: 'Top members by spend', desc: 'Top 20 by PKR paid in the last 12 months.' },
+  { id: 'yearend', icon: 'file-text', title: 'Year-end summary', desc: 'Full-year financial overview vs last year.' }
+];
+PAGES.reports = {
+  render() { return `<div class="grid grid-cols-3 gap-4">${REPORTS.map(r => `<button onclick="openReport('${r.id}')" class="group rounded-xl border border-line bg-white p-5 text-left hover:border-accent hover:shadow-sm transition"><span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><i data-lucide="${r.icon}" class="h-5 w-5"></i></span><div class="mt-3 font-semibold">${r.title}</div><div class="mt-1 text-[12px] text-sub leading-relaxed">${r.desc}</div><div class="mt-3 text-[12px] font-medium text-accent opacity-0 group-hover:opacity-100 transition">Open report →</div></button>`).join('')}</div>`; },
+  mount() {}
+};
+
+/* ---- Staff ---- */
+PAGES.staff = {
+  render() {
+    const rows = staff.map(s => `<tr class="row-hover cursor-pointer border-t border-line" onclick="openStaff('${s.id}')"><td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(s.name, 30)}<span class="font-medium">${s.name}</span></span></td><td class="px-4 py-2.5">${s.role}</td><td class="px-4 py-2.5 text-sub">${s.phone}</td><td class="px-4 py-2.5 text-right">${s.salary ? pkr(s.salary) : '—'}</td><td class="px-4 py-2.5">${s.status === 'active' ? '<span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">Active</span>' : '<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">On leave</span>'}</td></tr>`).join('');
+    return `<div class="flex items-center justify-between"><div class="text-sm text-sub">${staff.length} staff · monthly payroll ${pkr(staff.reduce((t, s) => t + s.salary, 0))}</div><button onclick="openAddStaff()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Add staff</button></div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><table class="w-full text-left dense"><thead class="bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr><th class="px-4 py-3 font-medium">Name</th><th class="px-4 py-3 font-medium">Role</th><th class="px-4 py-3 font-medium">Phone</th><th class="px-4 py-3 font-medium text-right">Monthly salary</th><th class="px-4 py-3 font-medium">Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  },
+  mount() {}
+};
+
+/* ---- Settings ---- */
+PAGES.settings = {
+  render() {
+    return `<div class="grid grid-cols-2 gap-4 max-w-5xl">
+      ${card('Gym details', `<div class="space-y-3">${field('Gym name','set-name',GYM.name||'')}${field('Address','set-addr',GYM.address||'')}${field('City','set-city',GYM.city||'')}${field('Phone','set-phone',GYM.phone||'')}<div><div class="text-[12px] font-medium text-sub mb-1">Logo</div><div class="flex h-20 items-center justify-center rounded-lg border border-dashed border-line text-[12px] text-sub">Drop logo here or click to upload</div></div><button onclick="saveGymDetails()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save details</button></div>`)}
+      ${card('Membership tiers', `<div class="space-y-2">${TIER_NAMES.map(t => `<div class="flex items-center justify-between gap-3"><span class="text-sm font-medium w-24">${t}</span><div class="flex items-center gap-2 flex-1"><span class="text-sub text-sm">PKR</span><input id="tier-${t}" type="number" value="${TIERS[t]}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /><span class="text-sub text-sm whitespace-nowrap">/ month</span></div></div>`).join('')}<button onclick="saveTiers()" class="mt-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save tiers</button></div>`)}
+      ${card('Fee policy', `<div class="space-y-3"><div class="flex items-center justify-between gap-3"><span class="text-sm">Billing cycle (days)</span><input id="pol-cycle" type="number" value="${POLICY.cycleDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><div class="flex items-center justify-between gap-3"><span class="text-sm">"Due soon" warning (days before)</span><input id="pol-due" type="number" value="${POLICY.dueSoonDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><button onclick="savePolicy()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save policy</button></div>`)}
+      ${card('Backup', `<div class="space-y-3"><div class="flex items-center gap-2 text-sm text-sub"><i data-lucide="clock" class="h-4 w-4"></i> Last backup: <span class="font-medium text-ink">${lastBackupText()}</span></div><div class="rounded-lg border border-line bg-panel p-3 text-[12px] text-sub leading-relaxed">Backups save the full database as a single <span class="font-medium text-ink">.db</span> file on this computer (in the app's <span class="font-mono">backups</span> folder and to your Downloads). Restore re-loads every record from a chosen backup file.</div><div class="flex flex-wrap gap-2"><button onclick="backupNow()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="download" class="h-4 w-4"></i>Back up now</button><button onclick="exportEverything()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Export everything to Excel</button><button onclick="document.getElementById('restore-input').click()" class="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50"><i data-lucide="upload" class="h-4 w-4"></i>Restore from backup file</button></div><div id="backup-meta" class="text-[12px] text-sub"></div></div>`)}
+      ${card('Users', `<div class="space-y-2">${users.map(u => `<div class="flex items-center justify-between rounded-lg border border-line px-3 py-2"><span class="flex items-center gap-2.5">${avatar(u.name, 28)}<span><span class="block font-medium text-sm">${u.name}</span><span class="block text-[11px] text-sub">${u.email || ''}</span></span></span><span class="text-[12px] text-sub">${u.role}</span></div>`).join('')}<button onclick="openAddUser()" class="mt-1 flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50"><i data-lucide="user-plus" class="h-4 w-4"></i>Add user</button></div>`)}
+      ${card('About', `<div class="space-y-1.5 text-sm"><div class="flex justify-between"><span class="text-sub">Software</span><span class="font-medium">${GYM.name || 'Demo Gym'} Manager</span></div><div class="flex justify-between"><span class="text-sub">Version</span><span class="font-medium">${VERSION}</span></div><div class="flex justify-between"><span class="text-sub">Scanner</span><span class="font-medium">${fpStatus.device || 'none'}</span></div><div class="flex justify-between"><span class="text-sub">Support</span><span class="font-medium">${GYM.email || ''}</span></div></div>`)}
+    </div>`;
+  },
+  mount() {}
+};
+function field(label, id, val) { return `<div><div class="text-[12px] font-medium text-sub mb-1">${label}</div><input id="${id}" value="${val}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>`; }
+
+/* ============================ SLIDE-OVERS / MODAL / TOAST ============================ */
+function openSlide(title, body) {
+  const panel = document.getElementById('slideover-panel');
+  panel.innerHTML = `<div class="flex items-center justify-between border-b border-line px-6 h-16 shrink-0"><h2 class="text-base font-semibold">${title}</h2><button onclick="closeSlide()" class="rounded-lg p-2 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><div class="flex-1 overflow-y-auto p-6">${body}</div>`;
+  document.getElementById('slideover').classList.remove('hidden');
+  requestAnimationFrame(() => panel.classList.remove('translate-x-full'));
+  if (window.lucide) lucide.createIcons();
+}
+function closeSlide() { const panel = document.getElementById('slideover-panel'); panel.classList.add('translate-x-full'); setTimeout(() => document.getElementById('slideover').classList.add('hidden'), 280); }
+function openModal(html) { document.getElementById('modal-card').innerHTML = html; const m = document.getElementById('modal'); m.classList.remove('hidden'); m.classList.add('flex'); if (window.lucide) lucide.createIcons(); }
+function closeModal() { const m = document.getElementById('modal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+let _toastT; function toast(msg) { document.getElementById('toast-msg').textContent = msg; const t = document.getElementById('toast'); t.classList.remove('hidden'); clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.add('hidden'), 2600); }
+
+/* ---- member detail ---- */
+function openMember(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  const owner = state.role === 'Owner'; const s = statusOf(m), due = dueDateOf(m);
+  const hist = payments.filter(p => p.memberId === id).slice(0, 12);
+  const histRows = hist.length ? hist.map(p => `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtDate(p.date)}</td><td class="py-2 pr-3">${p.month}</td><td class="py-2 pr-3">${p.method}</td><td class="py-2 text-right font-medium">${pkr(p.amount)}</td></tr>`).join('') : `<tr><td colspan="4" class="py-4 text-center text-sub text-[13px]">No payments recorded yet</td></tr>`;
+  const body = `
+    <div class="flex items-center gap-4">${avatar(m.name, 64)}<div class="flex-1"><div class="text-[12px] text-sub">${m.id} · ${m.type} membership</div><div class="text-xl font-semibold">${m.name}</div><div class="mt-1">${pill(s)}</div></div></div>
+    <div class="mt-5 grid grid-cols-2 gap-3 text-sm">
+      ${infoCell('Phone', m.phone)}${infoCell('Joined', fmtDateLong(m.joinDate))}${infoCell('Last payment', m.lastPayment ? fmtDateLong(m.lastPayment) : '—')}${infoCell('Next due', due ? fmtDateLong(due) : '—')}
+      ${infoCell('Fingerprint', m.fingerprint ? ('Enrolled · ' + (m.fingerprintSamples || ENROLL_SAMPLES) + ' samples') : 'Not enrolled')}
+      ${owner ? infoCell('Total spend', pkr(memberSpend(id))) : infoCell('Visits (90d)', memberVisits(id, 90))}
+    </div>
+    <div class="mt-5 flex flex-wrap gap-2">
+      <button onclick="closeSlide();openPaymentForm('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button>
+      <button onclick="openEditMember('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Edit</button>
+      <button onclick="toggleSuspend('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${m.suspended ? 'Re-activate' : 'Suspend membership'}</button>
+      <button onclick="openEnroll('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${m.fingerprint ? 'Re-enroll fingerprint' : 'Enroll fingerprint'}</button>
+    </div>
+    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Membership history</div><div class="rounded-lg border border-line p-3 text-sm"><div class="flex items-center gap-2"><i data-lucide="user-check" class="h-4 w-4 text-accent"></i> Enrolled as <span class="font-medium">${m.type}</span> on ${fmtDateLong(m.joinDate)}</div></div></div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 30 days</div>${heatmap(id)}</div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Payment history</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Date</th><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium">Method</th><th class="pb-1 font-medium text-right">Amount</th></tr></thead><tbody>${histRows}</tbody></table></div>`;
+  openSlide('Member detail', body);
+}
+function infoCell(label, val) { return `<div class="rounded-lg border border-line px-3 py-2"><div class="text-[11px] text-sub">${label}</div><div class="font-medium">${val}</div></div>`; }
+function heatmap(id) {
+  let cells = '';
+  for (let i = 29; i >= 0; i--) { const d = addDays(TODAY, -i); const n = checkins.filter(c => c.memberId === id && daysBetween(c.at, d) === 0).length; const bg = n === 0 ? '#eef2f6' : n === 1 ? '#9cc0e3' : '#185fa5'; cells += `<div title="${fmtDate(d)} · ${n} visit(s)" style="width:18px;height:18px;border-radius:4px;background:${bg}"></div>`; }
+  return `<div style="display:grid;grid-template-columns:repeat(15,18px);gap:5px">${cells}</div><div class="mt-2 flex items-center gap-2 text-[11px] text-sub">Less <span style="width:12px;height:12px;border-radius:3px;background:#eef2f6;display:inline-block"></span><span style="width:12px;height:12px;border-radius:3px;background:#9cc0e3;display:inline-block"></span><span style="width:12px;height:12px;border-radius:3px;background:#185fa5;display:inline-block"></span> More</div>`;
+}
+async function toggleSuspend(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  try { const updated = reviveMember(await api('/members/' + id + '/suspend', { method: 'POST' })); upsertMember(updated); toast(updated.suspended ? updated.name + ' suspended' : updated.name + ' re-activated'); } catch (e) { toast(e.message); }
+  closeSlide(); render();
+}
+
+/* ---- staff detail ---- */
+function openStaff(id) {
+  const s = staff.find(x => x.id === id); if (!s) return;
+  let salRows = ''; for (let i = 0; i < 6; i++) { const d = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 3); salRows += `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtMonth(d)}</td><td class="py-2 text-right font-medium">${s.salary ? pkr(s.salary) : '—'}</td><td class="py-2 pl-3 text-right text-green-600 text-[12px]">Paid</td></tr>`; }
+  let att = ''; for (let i = 13; i >= 0; i--) { const d = addDays(TODAY, -i); const dow = d.getDay(); const worked = !(s.status === 'on leave' && i < 6) && dow !== 0; att += `<div title="${fmtDate(d)}" style="width:20px;height:20px;border-radius:4px;background:${worked ? '#16a34a' : '#eef2f6'}"></div>`; }
+  const body = `<div class="flex items-center gap-4">${avatar(s.name, 64)}<div><div class="text-xl font-semibold">${s.name}</div><div class="text-sm text-sub">${s.role} · ${s.phone}</div><div class="mt-1 text-sm">Monthly salary: <span class="font-medium">${s.salary ? pkr(s.salary) : '—'}</span></div></div></div>
+    <div class="mt-5 flex gap-2"><button onclick="toast('Staff details saved')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Edit</button></div>
+    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Salary history</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium text-right">Amount</th><th class="pb-1 font-medium text-right">Status</th></tr></thead><tbody>${salRows}</tbody></table></div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 14 days</div><div style="display:grid;grid-template-columns:repeat(14,20px);gap:5px">${att}</div></div>`;
+  openSlide('Staff detail', body);
+}
+
+/* ---- reports detail ---- */
+function openReport(id) { openSlide((REPORTS.find(x => x.id === id) || {}).title || 'Report', '<div id="report-body"></div>'); setTimeout(() => { reportBody(id); if (window.lucide) lucide.createIcons(); }, 60); }
+function reportBody(id) {
+  const el = document.getElementById('report-body'); if (!el) return;
+  if (id === 'attendance') { const s = dailyCheckinSeries(30); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Date','Check-ins'], s.map(x => [fmtDate(x.d), x.count]))}`; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: [{ label: 'Check-ins', data: s.map(x => x.count), backgroundColor: '#185fa5', borderRadius: 3 }] }, options: barOpts(false) }); }
+  else if (id === 'collection') { const s = dailyCollectionSeries(30); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Date', ...METHODS, 'Total'], s.map(x => [fmtDate(x.d), ...METHODS.map(m => pkr(x.byMethod[m])), pkr(x.total)]))}`; const colors = { Cash: '#185fa5', Card: '#0f766e', Easypaisa: '#16a34a', JazzCash: '#d97706' }; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: METHODS.map(m => ({ label: m, data: s.map(x => x.byMethod[m]), backgroundColor: colors[m] })) }, options: barOpts(true, true) }); }
+  else if (id === 'mrev') { const s = monthlySeries(12); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Revenue','Members paid','Avg payment'], s.map(x => [x.label, pkr(x.rev), x.paidCount, pkr(x.payCount ? x.rev / x.payCount : 0)]))}`; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.label), datasets: [{ label: 'Revenue', data: s.map(x => x.rev), backgroundColor: '#16a34a', borderRadius: 3 }] }, options: barOpts(false) }); }
+  else if (id === 'mexp') { const cats = ['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other']; const colors = ['#4f46e5','#2563eb','#0891b2','#7c3aed','#0d9488','#d97706','#ea580c','#6b7280']; const ms = []; for (let i = 11; i >= 0; i--) ms.push(new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1)); const data = cats.map((c, ci) => ({ label: c, backgroundColor: colors[ci], data: ms.map(b => expenses.filter(e => monthKey(e.date) === monthKey(b) && e.category === c).reduce((t, e) => t + e.amount, 0)) })); el.innerHTML = `<div style="height:260px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Total'], ms.map(b => [MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2), pkr(expenses.filter(e => monthKey(e.date) === monthKey(b)).reduce((t, e) => t + e.amount, 0))]))}`; chart('r-canvas', { type: 'bar', data: { labels: ms.map(b => MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2)), datasets: data }, options: barOpts(true, true) }); }
+  else if (id === 'pnl') { const s = monthlySeries(12); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Revenue','Expenses','Net profit'], s.map(x => [x.label, pkr(x.rev), pkr(x.exp), netCell(x.rev - x.exp)]))}`; chart('r-canvas', { type: 'line', data: { labels: s.map(x => x.label), datasets: [{ label: 'Revenue', data: s.map(x => x.rev), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }, { label: 'Expenses', data: s.map(x => x.exp), borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }] }, options: lineOpts(true) }); }
+  else if (id === 'lapsed') { const lapsed = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 30); const buckets = { '31–60 days': [], '61–90 days': [], 'Over 90 days': [] }; lapsed.forEach(m => { const d = daysOverdue(m); if (d <= 60) buckets['31–60 days'].push(m); else if (d <= 90) buckets['61–90 days'].push(m); else buckets['Over 90 days'].push(m); }); el.innerHTML = Object.keys(buckets).map(k => `<div class="mb-4"><div class="mb-2 flex items-center gap-2 text-sm font-semibold">${k} <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-sub">${buckets[k].length}</span></div>${buckets[k].length ? `<table class="w-full text-left text-[13px]"><tbody>${buckets[k].map(m => `<tr class="border-t border-line cursor-pointer row-hover" onclick="closeSlide();openMember('${m.id}')"><td class="py-2"><span class="flex items-center gap-2">${avatar(m.name, 24)}${m.name}</span></td><td class="py-2 text-sub">${m.id}</td><td class="py-2 text-right text-red-600">${daysOverdue(m)} days</td><td class="py-2 text-right">${pkr(TIERS[m.type])}</td></tr>`).join('')}</tbody></table>` : '<div class="text-[13px] text-sub">None</div>'}</div>`).join(''); }
+  else if (id === 'retention') { const rows = []; for (let i = 7; i >= 0; i--) { const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1); const joined = members.filter(m => monthKey(m.joinDate) === monthKey(base)).length || (4 + (i % 5)); rows.push([fmtMonth(base), joined, i >= 1 ? Math.round(joined * 0.96) : '—', i >= 3 ? Math.round(joined * 0.84) : '—', i >= 6 ? Math.round(joined * 0.71) : '—', i >= 12 ? Math.round(joined * 0.58) : '—']); } el.innerHTML = `<p class="mb-3 text-[13px] text-sub">Members who joined each month and how many were still paying after N months.</p>${reportTable(['Cohort','Joined','1 mo','3 mo','6 mo','12 mo'], rows)}`; }
+  else if (id === 'topvisits') { const rows = members.map(m => ({ m, v: memberVisits(m.id, 90) })).sort((a, b) => b.v - a.v).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Visits (90d)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, x.v])); }
+  else if (id === 'topspend') { const rows = members.map(m => ({ m, s: memberSpend(m.id) })).sort((a, b) => b.s - a.s).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Total paid (12mo)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, pkr(x.s)])); }
+  else if (id === 'yearend') { const s12 = monthlySeries(12); const rev = s12.reduce((t, x) => t + x.rev, 0), exp = s12.reduce((t, x) => t + x.exp, 0), net = rev - exp; const newJoin = members.filter(m => daysBetween(m.joinDate, TODAY) <= 365).length; const lost = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 60).length; const prevRev = Math.round(rev * 0.86), prevExp = Math.round(exp * 0.91), prevNet = prevRev - prevExp; el.innerHTML = `<div class="grid grid-cols-2 gap-3">${yeKpi('Total revenue', pkr(rev), 'vs ' + pkr(prevRev) + ' last year', net >= 0)}${yeKpi('Total expenses', pkr(exp), 'vs ' + pkr(prevExp) + ' last year', false)}${yeKpi('Net profit', pkr(net), ((net - prevNet) >= 0 ? '+' : '') + pkr(net - prevNet) + ' vs last year', (net - prevNet) >= 0)}${yeKpi('Avg monthly revenue', pkr(rev / 12), '12-month average', true)}${yeKpi('New members', newJoin, 'joined this year', true)}${yeKpi('Members lost', lost, 'lapsed >60 days', false)}</div><div class="mt-4">${reportTable(['Metric','This year','Last year'], [['Revenue', pkr(rev), pkr(prevRev)], ['Expenses', pkr(exp), pkr(prevExp)], ['Net profit', pkr(net), pkr(prevNet)], ['Profit margin', Math.round(net / rev * 100) + '%', Math.round(prevNet / prevRev * 100) + '%']])}</div>`; }
+}
+function reportTable(headers, rows) { return `<table class="mt-4 w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub border-b border-line">${headers.map((h, i) => `<th class="py-2 font-medium ${i >= 2 ? 'text-right' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line last:border-0">${r.map((c, i) => `<td class="py-2 ${i >= 2 ? 'text-right' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`; }
+function netCell(v) { return `<span class="${v >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">${pkr(v)}</span>`; }
+function yeKpi(label, val, sub, good) { return `<div class="rounded-xl border border-line p-4"><div class="text-[12px] text-sub">${label}</div><div class="mt-1 text-xl font-semibold">${val}</div><div class="mt-1 text-[12px] ${good ? 'text-green-600' : 'text-sub'}">${sub}</div></div>`; }
+
+/* ============================ FORMS & ACTIONS (API-backed) ============================ */
+function upsertMember(m) { const i = members.findIndex(x => x.id === m.id); if (i >= 0) members[i] = m; else members.unshift(m); }
+function memberOptions(selId) { return members.map(m => `<option value="${m.id}" ${selId === m.id ? 'selected' : ''}>${m.name} · ${m.id}</option>`).join(''); }
+
+function openPaymentForm(memberId) {
+  const m = memberId ? members.find(x => x.id === memberId) : null;
+  openSlide('Record payment', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Member</div><select id="pf-member" onchange="pfSyncAmount()" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${memberOptions(memberId)}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="pf-amount" type="number" value="${m ? TIERS[m.type] : TIERS.Basic}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Method</div><select id="pf-method" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${METHODS.map(x => `<option>${x}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Notes (optional)</div><input id="pf-notes" placeholder="e.g. Monthly subscription" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitPayment()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+function pfSyncAmount() { const id = document.getElementById('pf-member').value; const m = members.find(x => x.id === id); if (m) document.getElementById('pf-amount').value = TIERS[m.type]; }
+async function recordPaymentFor(m, amount, method, notes) {
+  const r = await api('/payments', { method: 'POST', body: { memberId: m.id, amount: Number(amount), method, notes, recordedBy: ROLE_USER[state.role] } });
+  payments.unshift(revivePayment(r.payment)); upsertMember(reviveMember(r.member)); toast('Payment recorded for ' + m.name);
+}
+async function submitPayment() {
+  const id = document.getElementById('pf-member').value; const amt = document.getElementById('pf-amount').value; const method = document.getElementById('pf-method').value; const notes = document.getElementById('pf-notes').value;
+  const m = members.find(x => x.id === id); if (!m) return;
+  try { await recordPaymentFor(m, amt, method, notes); closeSlide(); render(); } catch (e) { toast(e.message); }
+}
+function openExpenseForm() {
+  openSlide('Record expense', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Category</div><select id="ef-cat" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other'].map(c => `<option>${c}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="ef-amount" type="number" value="10000" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Description</div><input id="ef-desc" placeholder="e.g. Treadmill belt service" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Date</div><input id="ef-date" type="date" value="${fmtDate(TODAY)}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitExpense()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record expense</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitExpense() {
+  const cat = document.getElementById('ef-cat').value, amt = Number(document.getElementById('ef-amount').value), desc = document.getElementById('ef-desc').value, date = document.getElementById('ef-date').value;
+  try { const e = reviveExpense(await api('/expenses', { method: 'POST', body: { category: cat, amount: amt, description: desc, date, recordedBy: ROLE_USER[state.role] } })); expenses.unshift(e); expenses.sort((a, b) => b.date - a.date); closeSlide(); toast('Expense recorded'); render(); } catch (err) { toast(err.message); }
+}
+function openAddMember() {
+  enroll = { samples: 0, reading: false, target: '__new__', sessionId: null };
+  startEnrollSession();
+  openSlide('Register new member', `<div class="space-y-4 max-w-md">
+    <div class="flex items-center gap-4"><div class="flex h-16 w-16 items-center justify-center rounded-full border border-dashed border-line text-[11px] text-sub text-center leading-tight">Photo</div><button class="rounded-lg border border-line px-3 py-2 text-sm font-medium hover:bg-gray-50">Upload photo</button></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Full name</div><input id="am-name" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="e.g. Ahsan Raza" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="am-phone" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="+92 3xx xxxxxxx" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Membership type</div><select id="am-type" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${TIER_NAMES.map(t => `<option>${t}</option>`).join('')}</select></div>
+    <div><div class="flex items-center justify-between mb-1"><div class="text-[12px] font-medium text-sub">Fingerprint enrollment</div><div class="text-[11px] text-sub">${ENROLL_SAMPLES} samples${fpStatus.mode === 'device' ? '' : ' · simulated'}</div></div><div id="enroll-area" class="rounded-lg border border-line p-4">${renderEnroll()}</div></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitMember()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add member</button><button onclick="cancelEnrollSession();closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitMember() {
+  const name = (document.getElementById('am-name').value || '').trim(); if (!name) { toast('Enter a member name'); return; }
+  const phone = document.getElementById('am-phone').value, type = document.getElementById('am-type').value;
+  const body = { name, phone, type }; if (enroll.samples >= ENROLL_SAMPLES && enroll.sessionId) body.enrollSessionId = enroll.sessionId;
+  try { const m = reviveMember(await api('/members', { method: 'POST', body })); upsertMember(m); closeSlide(); toast(name + ' registered' + (m.fingerprint ? ' · fingerprint enrolled' : '')); render(); } catch (e) { toast(e.message); }
+}
+function openEditMember(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  openSlide('Edit member', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Full name</div><input id="em-name" value="${m.name}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="em-phone" value="${m.phone}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Membership type</div><select id="em-type" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${TIER_NAMES.map(t => `<option ${m.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitEditMember('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save changes</button><button onclick="openMember('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitEditMember(id) {
+  const name = document.getElementById('em-name').value, phone = document.getElementById('em-phone').value, type = document.getElementById('em-type').value;
+  try { const m = reviveMember(await api('/members/' + id, { method: 'PUT', body: { name, phone, type } })); upsertMember(m); toast('Member updated'); render(); openMember(id); } catch (e) { toast(e.message); }
+}
+function openAddStaff() {
+  openSlide('Add staff', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Name</div><input id="as-name" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="Full name" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Role</div><select id="as-role" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Receptionist','Trainer','Cleaner','Owner'].map(r => `<option>${r}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="as-phone" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="+92 3xx xxxxxxx" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Monthly salary (PKR)</div><input id="as-salary" type="number" value="30000" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitStaff()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add staff</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitStaff() {
+  const name = (document.getElementById('as-name').value || '').trim(); if (!name) { toast('Enter a staff name'); return; }
+  try { const s = await api('/staff', { method: 'POST', body: { name, role: document.getElementById('as-role').value, phone: document.getElementById('as-phone').value, salary: Number(document.getElementById('as-salary').value) } }); staff.push(s); closeSlide(); toast(name + ' added to staff'); render(); } catch (e) { toast(e.message); }
+}
+function openAddUser() {
+  openSlide('Add user', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Name</div><input id="au-name" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Email</div><input id="au-email" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="name@demogym.pk" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Role</div><select id="au-role" class="w-full rounded-lg border border-line px-3 py-2 text-sm"><option>Receptionist</option><option>Owner</option></select></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitUser()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add user</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitUser() {
+  const name = (document.getElementById('au-name').value || '').trim(); if (!name) { toast('Enter a name'); return; }
+  try { const u = await api('/users', { method: 'POST', body: { name, role: document.getElementById('au-role').value, email: document.getElementById('au-email').value } }); users.push(u); closeSlide(); toast('User added'); render(); } catch (e) { toast(e.message); }
+}
+
+/* settings actions */
+async function saveGymDetails() {
+  try { GYM = await api('/settings/gym', { method: 'PUT', body: { name: document.getElementById('set-name').value, address: document.getElementById('set-addr').value, city: document.getElementById('set-city').value, phone: document.getElementById('set-phone').value } }); document.title = GYM.name + ' — Management System'; toast('Gym details saved'); render(); } catch (e) { toast(e.message); }
+}
+async function saveTiers() {
+  const body = {}; TIER_NAMES.forEach(t => { body[t] = Number(document.getElementById('tier-' + t).value); });
+  try { TIERS = await api('/settings/tiers', { method: 'PUT', body }); toast('Membership tiers updated'); render(); } catch (e) { toast(e.message); }
+}
+async function savePolicy() {
+  try { POLICY = await api('/settings/policy', { method: 'PUT', body: { cycleDays: Number(document.getElementById('pol-cycle').value), dueSoonDays: Number(document.getElementById('pol-due').value) } }); toast('Fee policy saved'); render(); } catch (e) { toast(e.message); }
+}
+function exportEverything() { const a = document.createElement('a'); a.href = '/api/export/csv'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Exported to CSV (opens in Excel)'); }
+
+/* backup / restore */
+async function backupNow() {
+  try {
+    const r = await api('/backup', { method: 'POST' });
+    state.lastBackup = new Date();
+    const a = document.createElement('a'); a.href = '/api/backup/file/' + encodeURIComponent(r.file); a.download = r.file; document.body.appendChild(a); a.click(); a.remove();
+    toast('Backup saved: ' + r.file);
+    const meta = document.getElementById('backup-meta'); if (meta) meta.textContent = 'Saved ' + r.file + ' (' + Math.round(r.size / 1024) + ' KB) to the backups folder and your Downloads.';
+    render();
+  } catch (e) { toast(e.message); }
+}
+async function restoreBackup(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  try {
+    const buf = await f.arrayBuffer();
+    const r = await fetch('/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf });
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'restore failed');
+    await loadBootstrap(); state.page = 'settings'; render(); toast('Restored ' + members.length + ' members from backup');
+  } catch (e) { toast('Could not restore: ' + e.message); }
+  input.value = '';
+}
+function lastBackupText() { return state.lastBackup ? relativeTime(state.lastBackup) : 'never'; }
+function relativeTime(d) { const s = Math.round((Date.now() - d.getTime()) / 1000); if (s < 45) return 'just now'; if (s < 90) return 'a minute ago'; const m = Math.round(s / 60); if (m < 60) return m + ' minutes ago'; const h = Math.round(m / 60); if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago'); const dd = Math.round(h / 24); return dd === 1 ? 'yesterday' : dd + ' days ago'; }
+
+/* ---- fingerprint enrollment (API-backed) ---- */
+let enroll = { samples: 0, reading: false, target: null, sessionId: null };
+async function startEnrollSession() { try { const r = await api('/fingerprint/enroll/start', { method: 'POST' }); enroll.sessionId = r.sessionId; } catch (e) {} }
+function cancelEnrollSession() { if (enroll.sessionId) { api('/fingerprint/enroll/cancel', { method: 'POST', body: { sessionId: enroll.sessionId } }).catch(() => {}); } }
+function renderEnroll() {
+  const done = enroll.samples >= ENROLL_SAMPLES; let slots = '';
+  for (let i = 0; i < ENROLL_SAMPLES; i++) { const filled = i < enroll.samples; const active = !done && i === enroll.samples && enroll.reading; slots += `<div class="flex h-11 w-11 items-center justify-center rounded-lg border ${filled ? 'border-green-500 bg-green-50 text-green-600' : active ? 'border-accent bg-accent-soft text-accent scan-pulse' : 'border-line text-gray-300'}"><i data-lucide="${filled ? 'check' : 'fingerprint'}" class="h-5 w-5"></i></div>`; }
+  let status;
+  if (done) status = '<span class="inline-flex items-center gap-1.5 text-sm font-medium text-green-600"><i data-lucide="shield-check" class="h-4 w-4"></i>Fingerprint enrolled — ' + ENROLL_SAMPLES + ' samples captured</span>';
+  else if (enroll.reading) status = '<span class="text-sm text-accent">' + (fpStatus.mode === 'device' ? 'Place finger on the ZK9500 — reading sample ' : 'Reading sample ') + (enroll.samples + 1) + ' of ' + ENROLL_SAMPLES + '…</span>';
+  else status = '<span class="text-sm text-sub">' + (enroll.samples === 0 ? 'Capture ' + ENROLL_SAMPLES + ' fingerprint samples.' : 'Captured ' + enroll.samples + ' of ' + ENROLL_SAMPLES + ' — capture again.') + '</span>';
+  return `<div class="flex items-center gap-3 mb-3">${slots}</div><div class="mb-3 min-h-[20px]">${status}</div>${done ? '<button type="button" onclick="resetEnroll()" class="rounded-lg border border-line px-3 py-2 text-sm font-medium hover:bg-gray-50">Re-scan</button>' : '<button type="button" onclick="captureSample()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover ' + (enroll.reading ? 'opacity-60 pointer-events-none' : '') + '"><i data-lucide="fingerprint" class="h-4 w-4"></i>' + (enroll.reading ? 'Reading…' : (enroll.samples === 0 ? 'Capture sample' : 'Capture sample ' + (enroll.samples + 1))) + '</button>'}`;
+}
+function refreshEnroll() { const el = document.getElementById('enroll-area'); if (el) { el.innerHTML = renderEnroll(); if (window.lucide) lucide.createIcons(); } }
+async function captureSample() {
+  if (enroll.reading || enroll.samples >= ENROLL_SAMPLES) return;
+  if (!enroll.sessionId) await startEnrollSession();
+  enroll.reading = true; refreshEnroll();
+  try { const r = await api('/fingerprint/enroll/sample', { method: 'POST', body: { sessionId: enroll.sessionId } }); if (r.captured) { enroll.samples = r.sample; ding(true); } else { toast('No finger detected — try again'); } }
+  catch (e) { toast(e.message); }
+  enroll.reading = false; refreshEnroll();
+}
+function resetEnroll() { cancelEnrollSession(); enroll = { samples: 0, reading: false, target: enroll.target, sessionId: null }; startEnrollSession(); refreshEnroll(); }
+function openEnroll(memberId) {
+  enroll = { samples: 0, reading: false, target: memberId, sessionId: null }; startEnrollSession();
+  const m = members.find(x => x.id === memberId);
+  openModal(`<div class="w-[420px] rounded-xl bg-white p-6 shadow-2xl"><div class="flex items-center justify-between mb-1"><h3 class="text-base font-semibold">${m && m.fingerprint ? 'Re-enroll' : 'Enroll'} fingerprint</h3><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg p-1.5 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><p class="text-[13px] text-sub mb-4">${m ? m.name + ' · ' + m.id : ''}</p><div id="enroll-area" class="rounded-lg border border-line p-4">${renderEnroll()}</div><div class="mt-5 flex justify-end gap-2"><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button><button onclick="saveEnroll()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save fingerprint</button></div></div>`);
+}
+async function saveEnroll() {
+  if (enroll.samples < ENROLL_SAMPLES) { toast('Capture all ' + ENROLL_SAMPLES + ' samples first'); return; }
+  try { const r = await api('/fingerprint/enroll/commit', { method: 'POST', body: { sessionId: enroll.sessionId, memberId: enroll.target } }); if (r.member) upsertMember(reviveMember(r.member)); closeModal(); toast('Fingerprint enrolled'); render(); if (members.find(x => x.id === enroll.target)) openMember(enroll.target); }
+  catch (e) { toast(e.message); }
+}
+
+/* ---- receipt ---- */
+function printReceipt(payId) {
+  const p = payments.find(x => x.id === payId); if (!p) return;
+  const receipt = `<div style="width:300px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Inter,system-ui,sans-serif">
+    <div style="background:#185fa5;color:#fff;padding:16px 18px"><div style="font-size:16px;font-weight:700">${GYM.name}</div><div style="font-size:11px;opacity:.9">${GYM.address}, ${GYM.city}</div><div style="font-size:11px;opacity:.9">${GYM.phone}</div></div>
+    <div style="padding:18px"><div style="text-align:center;font-size:12px;letter-spacing:.08em;color:#6b7280;text-transform:uppercase;margin-bottom:12px">Payment receipt</div>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><td style="color:#6b7280;padding:4px 0">Receipt no.</td><td style="text-align:right;font-weight:600">${p.id}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Date</td><td style="text-align:right">${fmtDateLong(p.date)}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Member</td><td style="text-align:right">${p.memberName} (${p.memberId})</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Membership month</td><td style="text-align:right">${p.month}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Method</td><td style="text-align:right">${p.method}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Received by</td><td style="text-align:right">${p.recordedBy}</td></tr>
+      </table>
+      <div style="border-top:1px dashed #d1d5db;margin:12px 0"></div>
+      <table style="width:100%;font-size:15px"><tr><td style="font-weight:700">Total paid</td><td style="text-align:right;font-weight:700;color:#185fa5">${pkr(p.amount)}</td></tr></table>
+      <div style="margin-top:28px;border-top:1px solid #111;width:140px;padding-top:4px;font-size:11px;color:#6b7280">Authorised signature</div>
+      <div style="margin-top:14px;text-align:center;font-size:11px;color:#9ca3af">Thank you for training with ${GYM.name}</div>
+    </div></div>`;
+  openModal(`<div class="rounded-xl bg-white p-4 shadow-2xl">${receipt}<div class="no-print mt-4 flex justify-end gap-2"><button onclick="closeModal()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Close</button><button onclick="doPrint()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Print</button></div></div>`);
+  document.getElementById('print-area').innerHTML = `<div style="display:flex;justify-content:center;padding-top:40px">${receipt}</div>`;
+}
+function doPrint() { window.print(); }
+
+/* ---- charts ---- */
+const _charts = {};
+function chart(id, cfg) { const el = document.getElementById(id); if (!el) return; if (_charts[id]) _charts[id].destroy(); _charts[id] = new Chart(el.getContext('2d'), cfg); }
+function baseScales(stacked) { return { x: { stacked: !!stacked, grid: { display: false }, ticks: { color: '#6b7280', font: { size: 11 }, maxRotation: 0, autoSkip: true } }, y: { stacked: !!stacked, beginAtZero: true, grid: { color: '#f0f1f3' }, ticks: { color: '#6b7280', font: { size: 11 }, callback: v => v >= 1000 ? (v / 1000) + 'k' : v } } }; }
+function legendTop(show) { return { display: !!show, position: 'top', align: 'end', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, font: { size: 11 }, color: '#374151' } }; }
+function tip() { return { backgroundColor: '#111827', padding: 10, cornerRadius: 8, titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: c => { const v = c.parsed.y; return c.dataset.label + ': ' + (v >= 1000 ? pkr(v) : v); } } }; }
+function lineOpts(legend) { return { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: legendTop(legend), tooltip: tip() }, scales: baseScales(false) }; }
+function barOpts(legend, stacked) { return { responsive: true, maintainAspectRatio: false, plugins: { legend: legendTop(legend), tooltip: tip() }, scales: baseScales(stacked) }; }
+
+/* ---- live scan WebSocket ---- */
+function connectWS() {
+  try {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(proto + '://' + location.host + '/ws');
+    ws.onmessage = (ev) => {
+      let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'scan' && msg.member) {
+        const m = reviveMember(msg.member); upsertMember(m); if (msg.checkin) checkins.unshift(reviveCheckin(msg.checkin));
+        if (state.page === 'scan') { scanState = { member: m, mode: 'member' }; refreshScan(); ding(statusOf(m) === 'Paid'); }
+        else if (state.page === 'dashboard') render();
+      } else if (msg.type === 'scan-unknown') {
+        if (state.page === 'scan') { scanState = { mode: 'unknown' }; refreshScan(); ding(false); }
+      }
+    };
+    ws.onclose = () => setTimeout(connectWS, 4000); // auto-reconnect
+  } catch (e) {}
+}
+
+/* ---- bootstrap ---- */
+document.addEventListener('DOMContentLoaded', async () => {
+  try { await loadBootstrap(); render(); connectWS(); }
+  catch (e) { document.getElementById('app').innerHTML = '<div class="m-auto max-w-md text-center"><div class="text-lg font-semibold text-red-600">Could not reach the server</div><div class="mt-2 text-sm text-sub">' + e.message + '</div><div class="mt-2 text-sm text-sub">Make sure the Demo Gym server is running, then reload.</div></div>'; }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeSlide(); closeModal(); } });
+});
+</script>
+</body>
+</html>
