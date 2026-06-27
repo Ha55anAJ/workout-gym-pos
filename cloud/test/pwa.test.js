@@ -95,6 +95,10 @@ test('CSP is tight (self + inline, no external CDN) and SW-friendly', async () =
   const csp = res.headers.get('content-security-policy') || '';
   assert.match(csp, /'unsafe-inline'/);
   assert.doesNotMatch(csp, /cdnjs|tailwindcss\.com|jsdelivr|unpkg/);
+  // the app UI uses inline event handlers (onclick/onsubmit) — CSP must allow them,
+  // i.e. script-src-attr must NOT be 'none' (Helmet's default that blocks buttons).
+  assert.doesNotMatch(csp, /script-src-attr 'none'/);
+  assert.match(csp, /script-src-attr[^;]*'unsafe-inline'/);
   // must NOT carry cross-origin isolation that would block the SW/manifest
   assert.equal(res.headers.get('cross-origin-embedder-policy'), null);
 });

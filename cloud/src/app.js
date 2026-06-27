@@ -12,8 +12,10 @@ function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);   // behind Railway's edge proxy: trust 1 hop so rate-limiting sees real client IPs
 
-  // Everything is self-hosted now, so the CSP stays tight: only 'self' + inline
-  // scripts/styles (the SPA uses one inline <script> and an inline <style>).
+  // Everything is self-hosted, so the CSP stays tight: only 'self' + inline
+  // scripts/styles. The app UI relies on inline event handlers (onclick/onsubmit/
+  // onchange), so scriptSrcAttr MUST allow 'unsafe-inline' — Helmet's default of
+  // script-src-attr 'none' silently blocks every button/handler otherwise.
   // COEP off and CORP cross-origin so the service worker + manifest load cleanly.
   app.use(helmet({
     contentSecurityPolicy: {
@@ -21,6 +23,7 @@ function createApp() {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'"],
