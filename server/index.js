@@ -17,6 +17,7 @@ const routes = require('./routes');
 const S = require('./lib/serialize');
 const { logCheckin, logStaffCheckin } = require('./lib/checkin');
 const fp = require('./services/fingerprint');
+const syncAgent = require('./services/sync/agent');
 
 // Never let a stray error take the server down (otherwise the UI shows 'failed to fetch').
 function logErr(tag, e) {
@@ -86,6 +87,17 @@ async function start() {
     console.log('\n  Demo Gym is running.');
     console.log('  Open:  ' + url + '\n');
     if (!noOpen) openBrowser(url);
+
+    // Phase 2 — optional cloud sync. Outbound-only; fully isolated so it can
+    // never take the local app down. Disabled unless explicitly configured.
+    try {
+      if (cfg.cloudSync && cfg.cloudUrl && cfg.syncToken) {
+        syncAgent.start({ cfg, db, logErr });
+        console.log('[sync] cloud sync enabled -> ' + cfg.cloudUrl + ' (every ' + (cfg.syncIntervalMs / 1000) + 's)');
+      } else {
+        console.log('[sync] cloud sync disabled (set CLOUD_SYNC=1, CLOUD_URL and SYNC_DEVICE_TOKEN to enable)');
+      }
+    } catch (e) { logErr('[sync-start]', e); }
   });
 }
 
@@ -96,6 +108,7 @@ function openBrowser(url) {
 
 function shutdown() {
   console.log('\nShutting down…');
+  try { syncAgent.stop(); } catch (e) {}
   try { fp.stop(); } catch (e) {}
   try { db.close(); } catch (e) {}
   process.exit(0);

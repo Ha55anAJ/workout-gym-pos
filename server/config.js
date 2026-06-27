@@ -25,5 +25,11 @@ module.exports = {
   fingerprintMode: process.env.FINGERPRINT_MODE || 'auto',
   zkLibPath: process.env.ZK_LIB_PATH || 'libzkfp',
 
-  openBrowser: process.env.OPEN_BROWSER !== '0'
+  openBrowser: process.env.OPEN_BROWSER !== '0',
+
+  // Phase 2 — cloud sync agent (outbound HTTPS only; never opens a port).
+  cloudUrl: process.env.CLOUD_URL || '',
+  syncToken: process.env.SYNC_DEVICE_TOKEN || '',
+  cloudSync: process.env.CLOUD_SYNC === '1',
+  syncIntervalMs: Number(process.env.SYNC_INTERVAL_MS) || 30000
 };

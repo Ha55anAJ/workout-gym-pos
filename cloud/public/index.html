@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#4f46e5" />
+  <meta name="description" content="Demo Gym owner dashboard" />
+  <title>Demo Gym</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Demo Gym" />
+
+  <!-- Tailwind + Chart.js via cdnjs (whitelisted in helmet CSP) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/3.4.5/tailwind.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; }
+    .tabbtn.active { color: #818cf8; }
+    .tabbtn.active .tabicon { background: rgba(129,140,248,.15); }
+    input, select, textarea {
+      background: #0f172a; border: 1px solid #334155; color: #e2e8f0;
+      border-radius: .6rem; padding: .55rem .7rem; width: 100%; outline: none;
+    }
+    input:focus, select:focus, textarea:focus { border-color: #6366f1; }
+    button { font: inherit; }
+    .badge { font-size: .68rem; padding: .12rem .5rem; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
+    .b-active { background: rgba(34,197,94,.15); color: #4ade80; }
+    .b-due    { background: rgba(234,179,8,.15);  color: #facc15; }
+    .b-susp   { background: rgba(239,68,68,.15);  color: #f87171; }
+    .spin { width: 22px; height: 22px; border: 3px solid #334155; border-top-color: #818cf8; border-radius: 50%; animation: r 0.8s linear infinite; }
+    @keyframes r { to { transform: rotate(360deg); } }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
+    .toast-in { animation: ti .25s ease-out; }
+    @keyframes ti { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+  <!-- App title marker for tests: id="app" + "Demo Gym" -->
+  <div id="app"></div>
+
+  <!-- Toast region -->
+  <div id="toasts" class="fixed left-0 right-0 bottom-20 z-50 flex flex-col items-center gap-2 px-4 pointer-events-none"></div>
+
+  <noscript><div style="padding:2rem">Demo Gym dashboard requires JavaScript.</div></noscript>
+
+  <script>
+  'use strict';
+  (function () {
+    // ---------------------------------------------------------------------
+    // Tiny utilities
+    // ---------------------------------------------------------------------
+    var TOKEN_KEY = 'demoGym.token';
+    var ACCT_KEY = 'demoGym.account';
+    var state = {
+      token: localStorage.getItem(TOKEN_KEY) || null,
+      account: safeParse(localStorage.getItem(ACCT_KEY)),
+      data: null,        // bootstrap payload
+      view: 'dashboard',
+      memberSearch: '',
+      memberFilter: 'all',
+      loading: false
+    };
+    var chart = null;
+
+    function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+    function $(sel, root) { return (root || document).querySelector(sel); }
+    function el(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function isOwner() { return state.account && state.account.role === 'Owner'; }
+
+    // Currency: PKR integers
+    function pkr(n) {
+      n = Math.round(Number(n) || 0);
+      return 'Rs ' + n.toLocaleString('en-PK');
+    }
+    function todayStr() { return new Date().toISOString().slice(0, 10); }       // YYYY-MM-DD
+    function monthStr(d) { return (d || new Date()).toISOString().slice(0, 7); } // YYYY-MM
+
+    // ---------------------------------------------------------------------
+    // API layer
+    // ---------------------------------------------------------------------
+    function api(path, opts) {
+      opts = opts || {};
+      var headers = Object.assign({}, opts.headers || {});
+      if (state.token) headers['authorization'] = 'Bearer ' + state.token;
+      if (opts.body != null) headers['content-type'] = 'application/json';
+      return fetch('/api' + path, {
+        method: opts.method || 'GET',
+        headers: headers,
+        body: opts.body != null ? JSON.stringify(opts.body) : undefined
+      }).then(function (res) {
+        if (res.status === 401) { logout(true); throw new Error('Session expired'); }
+        return res.json().catch(function () { return {}; }).then(function (j) {
+          if (!res.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
+          return j;
+        });
+      });
+    }
+
+    function login(username, password) {
+      return api('/auth/login', { method: 'POST', body: { username: username, password: password } })
+        .then(function (r) {
+          state.token = r.token;
+          state.account = r.account;
+          localStorage.setItem(TOKEN_KEY, r.token);
+          localStorage.setItem(ACCT_KEY, JSON.stringify(r.account));
+        });
+    }
+
+    function logout(silent) {
+      state.token = null; state.account = null; state.data = null;
+      localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ACCT_KEY);
+      if (!silent) toast('Signed out.');
+      render();
+    }
+
+    function loadBootstrap() {
+      return api('/bootstrap').then(function (d) { state.data = normalize(d); return state.data; });
+    }
+
+    // Normalize / precompute helpers on the raw snake_case bootstrap.
+    function normalize(d) {
+      d = d || {};
+      d.settings = d.settings || {};
+      d.members = d.members || [];
+      d.payments = d.payments || [];
+      d.expenses = d.expenses || [];
+      d.checkins = d.checkins || [];
+      d.staff = d.staff || [];
+      d.policy = (d.settings && d.settings.policy) || { cycleDays: 30, dueSoonDays: 5 };
+      return d;
+    }
+
+    // Member status: suspended==1 -> Suspended; else lapsed if no/old payment.
+    function memberStatus(m, policy) {
+      if (Number(m.suspended) === 1) return 'suspended';
+      var cycle = (policy && policy.cycleDays) || 30;
+      if (!m.last_payment) return 'due';
+      var last = new Date(m.last_payment + (m.last_payment.length <= 10 ? 'T00:00:00' : ''));
+      if (isNaN(last.getTime())) return 'due';
+      var days = (Date.now() - last.getTime()) / 86400000;
+      return days > cycle ? 'due' : 'active';
+    }
+    function statusBadge(st) {
+      if (st === 'active') return '<span class="badge b-active">Active</span>';
+      if (st === 'suspended') return '<span class="badge b-susp">Suspended</span>';
+      return '<span class="badge b-due">Due</span>';
+    }
+
+    // ---------------------------------------------------------------------
+    // Toasts
+    // ---------------------------------------------------------------------
+    function toast(msg, kind) {
+      var color = kind === 'error' ? 'bg-red-600' : (kind === 'ok' ? 'bg-indigo-600' : 'bg-slate-700');
+      var t = el('<div class="toast-in pointer-events-auto ' + color +
+        ' text-white text-sm px-4 py-2.5 rounded-xl shadow-lg max-w-sm text-center">' + esc(msg) + '</div>');
+      $('#toasts').appendChild(t);
+      setTimeout(function () { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 320); }, 3200);
+    }
+
+    // Issue an owner command, then refresh bootstrap after a short delay.
+    function sendCommand(type, payload) {
+      if (!isOwner()) { toast('Only the owner can do that.', 'error'); return Promise.resolve(); }
+      return api('/commands', { method: 'POST', body: { type: type, payload: payload || {} } })
+        .then(function () {
+          toast('Queued — will apply on the gym laptop shortly.', 'ok');
+          setTimeout(function () { refresh(true); }, 1500);
+        })
+        .catch(function (e) { toast(e.message || 'Command failed', 'error'); });
+    }
+
+    function refresh(quiet) {
+      if (!state.token) return Promise.resolve();
+      if (!quiet) setLoading(true);
+      return loadBootstrap().then(function () { render(); }).catch(function (e) {
+        if (state.token) toast(e.message || 'Failed to load', 'error');
+      }).finally(function () { setLoading(false); });
+    }
+    function setLoading(v) { state.loading = v; var b = $('#refreshBtn'); if (b) b.classList.toggle('opacity-40', v); }
+
+    // ---------------------------------------------------------------------
+    // Render: top-level router
+    // ---------------------------------------------------------------------
+    function render() {
+      var root = $('#app');
+      if (!state.token) { root.innerHTML = ''; root.appendChild(loginScreen()); return; }
+      if (!state.data) { root.innerHTML = ''; root.appendChild(loadingScreen()); return; }
+      root.innerHTML = '';
+      root.appendChild(shell());
+    }
+
+    function loadingScreen() {
+      return el('<div class="min-h-screen flex flex-col items-center justify-center gap-3">' +
+        '<div class="spin"></div><div class="text-slate-400 text-sm">Loading Demo Gym…</div></div>');
+    }
+
+    // ---------------------------------------------------------------------
+    // Login screen
+    // ---------------------------------------------------------------------
+    function loginScreen() {
+      var wrap = el(
+        '<div class="min-h-screen flex flex-col justify-center px-6 max-w-md mx-auto w-full">' +
+          '<div class="text-center mb-8">' +
+            '<div class="mx-auto mb-4 w-16 h-16 rounded-2xl flex items-center justify-center" style="background:linear-gradient(160deg,#6366f1,#4f46e5)">' +
+              '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>' +
+            '</div>' +
+            '<h1 class="text-2xl font-bold text-white">Demo Gym</h1>' +
+            '<p class="text-slate-400 text-sm mt-1">Owner dashboard</p>' +
+          '</div>' +
+          '<form id="loginForm" class="card p-5 space-y-4">' +
+            '<div><label class="block text-xs font-medium text-slate-400 mb-1">Username</label>' +
+              '<input id="u" autocomplete="username" autocapitalize="none" required /></div>' +
+            '<div><label class="block text-xs font-medium text-slate-400 mb-1">Password</label>' +
+              '<input id="p" type="password" autocomplete="current-password" required /></div>' +
+            '<div id="loginErr" class="text-red-400 text-sm hidden"></div>' +
+            '<button type="submit" id="loginBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl transition">Sign in</button>' +
+          '</form>' +
+          '<p class="text-center text-slate-600 text-xs mt-6">Demo Gym · PKR</p>' +
+        '</div>'
+      );
+      wrap.querySelector('#loginForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = wrap.querySelector('#loginBtn');
+        var errBox = wrap.querySelector('#loginErr');
+        errBox.classList.add('hidden');
+        btn.disabled = true; btn.textContent = 'Signing in…';
+        login(wrap.querySelector('#u').value.trim(), wrap.querySelector('#p').value)
+          .then(function () { return refresh(); })
+          .then(function () { render(); })
+          .catch(function (err) {
+            errBox.textContent = /credential/i.test(err.message) ? 'Invalid username or password.' : (err.message || 'Login failed');
+            errBox.classList.remove('hidden');
+            btn.disabled = false; btn.textContent = 'Sign in';
+          });
+      });
+      return wrap;
+    }
+
+    // ---------------------------------------------------------------------
+    // App shell (header + view + bottom tab bar)
+    // ---------------------------------------------------------------------
+    var TABS = [
+      { id: 'dashboard', label: 'Home', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
+      { id: 'members', label: 'Members', icon: 'M17 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M21 20v-2a4 4 0 0 0-3-3.87' },
+      { id: 'payments', label: 'Payments', icon: 'M2 7h20v10H2zM2 11h20M6 15h4' },
+      { id: 'expenses', label: 'Expenses', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
+      { id: 'reports', label: 'Reports', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' }
+    ];
+
+    function shell() {
+      var root = el('<div class="max-w-3xl mx-auto pb-24"></div>');
+
+      // Header
+      var gymName = (state.data.settings.gym && state.data.settings.gym.name) || 'Demo Gym';
+      var header = el(
+        '<header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between" style="padding-top:max(.75rem,env(safe-area-inset-top))">' +
+          '<div class="flex items-center gap-2 min-w-0">' +
+            '<div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center" style="background:linear-gradient(160deg,#6366f1,#4f46e5)">' +
+              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M6.5 7v10M17.5 7v10M4 9.5v5M20 9.5v5M6.5 12h11"/></svg>' +
+            '</div>' +
+            '<div class="min-w-0"><div class="font-bold text-white leading-tight truncate">' + esc(gymName) + '</div>' +
+              '<div class="text-[11px] text-slate-400 leading-tight truncate">' + esc(state.account.name || state.account.username) + ' · ' + esc(state.account.role) + '</div></div>' +
+          '</div>' +
+          '<div class="flex items-center gap-1.5">' +
+            '<button id="refreshBtn" title="Refresh" class="p-2 rounded-lg hover:bg-slate-800 text-slate-300"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg></button>' +
+            '<button id="logoutBtn" title="Sign out" class="p-2 rounded-lg hover:bg-slate-800 text-slate-300"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>' +
+          '</div>' +
+        '</header>'
+      );
+      header.querySelector('#refreshBtn').addEventListener('click', function () { refresh(); });
+      header.querySelector('#logoutBtn').addEventListener('click', function () { logout(); });
+      root.appendChild(header);
+
+      // View body
+      var body = el('<main class="px-4 py-4"></main>');
+      var v = state.view;
+      if (v === 'dashboard') body.appendChild(viewDashboard());
+      else if (v === 'members') body.appendChild(viewMembers());
+      else if (v === 'payments') body.appendChild(viewPayments());
+      else if (v === 'expenses') body.appendChild(viewExpenses());
+      else if (v === 'reports') body.appendChild(viewReports());
+      root.appendChild(body);
+
+      // Bottom tab bar
+      var nav = el('<nav class="fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur border-t border-slate-800 flex" style="padding-bottom:env(safe-area-inset-bottom)"></nav>');
+      TABS.forEach(function (t) {
+        var b = el(
+          '<button class="tabbtn flex-1 flex flex-col items-center gap-0.5 py-2 text-slate-400 ' + (v === t.id ? 'active' : '') + '">' +
+            '<span class="tabicon rounded-lg px-3 py-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + t.icon + '"/></svg></span>' +
+            '<span class="text-[10px] font-medium">' + t.label + '</span>' +
+          '</button>'
+        );
+        b.addEventListener('click', function () { state.view = t.id; render(); window.scrollTo(0, 0); });
+        nav.appendChild(b);
+      });
+      root.appendChild(nav);
+      return root;
+    }
+
+    // ---------------------------------------------------------------------
+    // Dashboard
+    // ---------------------------------------------------------------------
+    function viewDashboard() {
+      var d = state.data;
+      var thisMonth = monthStr();
+      var today = todayStr();
+
+      var activeCount = d.members.filter(function (m) { return memberStatus(m, d.policy) === 'active'; }).length;
+      var collectedMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; })
+        .reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+      var expMonth = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; })
+        .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+      var checkinsToday = d.checkins.filter(function (c) { return (c.at || '').slice(0, 10) === today; }).length;
+
+      var wrap = el('<div class="space-y-4"></div>');
+
+      // KPI grid
+      var grid = el('<div class="grid grid-cols-2 gap-3"></div>');
+      [
+        ['Total members', String(d.members.length), '#818cf8'],
+        ['Active members', String(activeCount), '#4ade80'],
+        ['Collected (month)', pkr(collectedMonth), '#34d399'],
+        ['Expenses (month)', pkr(expMonth), '#f87171'],
+        ["Check-ins today", String(checkinsToday), '#fbbf24']
+      ].forEach(function (k) {
+        grid.appendChild(el(
+          '<div class="card p-3.5">' +
+            '<div class="text-[11px] uppercase tracking-wide text-slate-400">' + esc(k[0]) + '</div>' +
+            '<div class="text-xl font-bold mt-1" style="color:' + k[2] + '">' + esc(k[1]) + '</div>' +
+          '</div>'
+        ));
+      });
+      wrap.appendChild(grid);
+
+      // Revenue chart
+      var chartCard = el(
+        '<div class="card p-4">' +
+          '<div class="text-sm font-semibold text-white mb-3">Monthly revenue (PKR)</div>' +
+          '<div style="position:relative;height:200px"><canvas id="revChart"></canvas></div>' +
+        '</div>'
+      );
+      wrap.appendChild(chartCard);
+
+      // Recent check-ins
+      var recent = d.checkins.slice(0, 8);
+      var ci = el('<div class="card p-4"><div class="text-sm font-semibold text-white mb-3">Recent check-ins</div></div>');
+      if (!recent.length) ci.appendChild(el('<div class="text-slate-500 text-sm">No check-ins yet.</div>'));
+      else {
+        var list = el('<div class="space-y-2"></div>');
+        recent.forEach(function (c) {
+          var when = c.at ? new Date(c.at) : null;
+          var label = when && !isNaN(when.getTime()) ? when.toLocaleString('en-PK', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+          list.appendChild(el(
+            '<div class="flex items-center justify-between text-sm">' +
+              '<div class="flex items-center gap-2 min-w-0"><span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>' +
+                '<span class="text-slate-200 truncate">' + esc(c.member_name || c.member_code || 'Member') + '</span></div>' +
+              '<span class="text-slate-500 text-xs shrink-0">' + esc(label) + '</span>' +
+            '</div>'
+          ));
+        });
+        ci.appendChild(list);
+      }
+      wrap.appendChild(ci);
+
+      // draw chart after attach
+      setTimeout(function () { drawRevenueChart(d); }, 0);
+      return wrap;
+    }
+
+    function monthlyRevenue(d) {
+      var map = {};
+      d.payments.forEach(function (p) {
+        var m = p.month || (p.date || '').slice(0, 7);
+        if (!m) return;
+        map[m] = (map[m] || 0) + (Number(p.amount) || 0);
+      });
+      var months = Object.keys(map).sort();
+      // keep the last 6 for a phone-sized chart
+      if (months.length > 6) months = months.slice(months.length - 6);
+      return { labels: months, values: months.map(function (m) { return map[m]; }) };
+    }
+
+    function drawRevenueChart(d) {
+      var canvas = $('#revChart');
+      if (!canvas || typeof Chart === 'undefined') return;
+      var r = monthlyRevenue(d);
+      if (chart) { chart.destroy(); chart = null; }
+      chart = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: r.labels.length ? r.labels : ['—'],
+          datasets: [{
+            data: r.values.length ? r.values : [0],
+            backgroundColor: '#6366f1',
+            borderRadius: 6,
+            maxBarThickness: 46
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: function (c) { return pkr(c.parsed.y); } } }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: function (v) { return v >= 1000 ? (v / 1000) + 'k' : v; } } }
+          }
+        }
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    // Members
+    // ---------------------------------------------------------------------
+    function viewMembers() {
+      var d = state.data;
+      var wrap = el('<div class="space-y-3"></div>');
+
+      // Search + filter
+      var controls = el(
+        '<div class="space-y-2">' +
+          '<input id="mSearch" placeholder="Search name, code or phone…" value="' + esc(state.memberSearch) + '" />' +
+          '<div class="flex gap-2 text-xs" id="mFilters"></div>' +
+        '</div>'
+      );
+      var filters = [['all', 'All'], ['active', 'Active'], ['due', 'Due'], ['suspended', 'Suspended']];
+      var fbox = controls.querySelector('#mFilters');
+      filters.forEach(function (f) {
+        var on = state.memberFilter === f[0];
+        var b = el('<button class="px-3 py-1.5 rounded-lg font-medium ' + (on ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300') + '">' + f[1] + '</button>');
+        b.addEventListener('click', function () { state.memberFilter = f[0]; render(); });
+        fbox.appendChild(b);
+      });
+      var search = controls.querySelector('#mSearch');
+      search.addEventListener('input', function () {
+        state.memberSearch = search.value;
+        var list = $('#mList'); if (list) renderMemberList(list);
+      });
+      wrap.appendChild(controls);
+
+      var listBox = el('<div id="mList" class="space-y-2"></div>');
+      wrap.appendChild(listBox);
+      renderMemberList(listBox);
+      return wrap;
+    }
+
+    function renderMemberList(container) {
+      var d = state.data;
+      var q = state.memberSearch.trim().toLowerCase();
+      var rows = d.members.filter(function (m) {
+        var st = memberStatus(m, d.policy);
+        if (state.memberFilter !== 'all' && state.memberFilter !== st) return false;
+        if (!q) return true;
+        return (m.name || '').toLowerCase().indexOf(q) >= 0 ||
+               (m.code || '').toLowerCase().indexOf(q) >= 0 ||
+               (m.phone || '').toLowerCase().indexOf(q) >= 0;
+      });
+      container.innerHTML = '';
+      if (!rows.length) { container.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No members match.</div>')); return; }
+
+      rows.forEach(function (m) {
+        var st = memberStatus(m, d.policy);
+        var card = el(
+          '<div class="card p-3.5">' +
+            '<div class="flex items-start justify-between gap-2">' +
+              '<div class="min-w-0">' +
+                '<div class="font-semibold text-white truncate">' + esc(m.name) + '</div>' +
+                '<div class="text-xs text-slate-400 mt-0.5">' + esc(m.code) + (m.phone ? ' · ' + esc(m.phone) : '') + ' · ' + esc(m.type || 'Basic') + '</div>' +
+                '<div class="text-xs text-slate-500 mt-0.5">Last payment: ' + esc(m.last_payment || '—') + '</div>' +
+              '</div>' +
+              '<div>' + statusBadge(st) + '</div>' +
+            '</div>' +
+          '</div>'
+        );
+
+        if (isOwner()) {
+          var actions = el('<div class="flex gap-2 mt-3"></div>');
+          var payBtn = el('<button class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 rounded-lg">Record payment</button>');
+          payBtn.addEventListener('click', function () { openPaymentModal(m); });
+          actions.appendChild(payBtn);
+
+          if (Number(m.suspended) === 1) {
+            var reBtn = el('<button class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-lg">Reactivate</button>');
+            reBtn.addEventListener('click', function () { sendCommand('reactivateMember', { code: m.code }); });
+            actions.appendChild(reBtn);
+          } else {
+            var suBtn = el('<button class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-semibold py-2 rounded-lg">Suspend</button>');
+            suBtn.addEventListener('click', function () { sendCommand('suspendMember', { code: m.code }); });
+            actions.appendChild(suBtn);
+          }
+          card.appendChild(actions);
+        }
+        container.appendChild(card);
+      });
+    }
+
+    // Modal: record payment
+    function openPaymentModal(m) {
+      var defaultAmount = (state.data.settings.tiers && state.data.settings.tiers[m.type]) || '';
+      var overlay = el(
+        '<div class="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-4">' +
+          '<div class="card w-full max-w-sm p-5 space-y-4">' +
+            '<div class="flex items-center justify-between"><h3 class="font-bold text-white">Record payment</h3>' +
+              '<button id="mx" class="text-slate-400 text-xl leading-none">&times;</button></div>' +
+            '<div class="text-sm text-slate-400">' + esc(m.name) + ' · ' + esc(m.code) + '</div>' +
+            '<div><label class="block text-xs text-slate-400 mb-1">Amount (PKR)</label>' +
+              '<input id="payAmt" type="number" inputmode="numeric" min="0" value="' + esc(defaultAmount) + '" /></div>' +
+            '<div><label class="block text-xs text-slate-400 mb-1">Method</label>' +
+              '<select id="payMethod"><option>Cash</option><option>Card</option><option>Bank Transfer</option><option>JazzCash</option><option>Easypaisa</option></select></div>' +
+            '<div class="flex gap-2 pt-1">' +
+              '<button id="payCancel" class="flex-1 bg-slate-700 text-slate-100 font-semibold py-2.5 rounded-xl">Cancel</button>' +
+              '<button id="paySave" class="flex-1 bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Queue payment</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+      function close() { overlay.remove(); }
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+      overlay.querySelector('#mx').addEventListener('click', close);
+      overlay.querySelector('#payCancel').addEventListener('click', close);
+      overlay.querySelector('#paySave').addEventListener('click', function () {
+        var amt = Math.round(Number(overlay.querySelector('#payAmt').value) || 0);
+        if (amt <= 0) { toast('Enter a valid amount.', 'error'); return; }
+        var method = overlay.querySelector('#payMethod').value;
+        close();
+        sendCommand('recordPayment', { memberCode: m.code, amount: amt, method: method });
+      });
+      document.body.appendChild(overlay);
+      setTimeout(function () { var a = overlay.querySelector('#payAmt'); if (a) a.focus(); }, 50);
+    }
+
+    // ---------------------------------------------------------------------
+    // Payments
+    // ---------------------------------------------------------------------
+    function viewPayments() {
+      var d = state.data;
+      var today = todayStr();
+      var thisMonth = monthStr();
+      var collectedToday = d.payments.filter(function (p) { return (p.date || '') === today; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+      var collectedMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+
+      var wrap = el('<div class="space-y-3"></div>');
+      var totals = el('<div class="grid grid-cols-2 gap-3"></div>');
+      totals.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Collected today</div><div class="text-lg font-bold mt-1 text-emerald-400">' + esc(pkr(collectedToday)) + '</div></div>'));
+      totals.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Collected this month</div><div class="text-lg font-bold mt-1 text-emerald-400">' + esc(pkr(collectedMonth)) + '</div></div>'));
+      wrap.appendChild(totals);
+
+      var listBox = el('<div class="space-y-2"></div>');
+      var rows = d.payments.slice(0, 200);
+      if (!rows.length) listBox.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No payments recorded.</div>'));
+      rows.forEach(function (p) {
+        listBox.appendChild(el(
+          '<div class="card p-3.5 flex items-center justify-between gap-3">' +
+            '<div class="min-w-0">' +
+              '<div class="font-medium text-white truncate">' + esc(p.member_name || p.member_code || '—') + '</div>' +
+              '<div class="text-xs text-slate-400 mt-0.5">' + esc(p.date || '') + (p.method ? ' · ' + esc(p.method) : '') + (p.month ? ' · ' + esc(p.month) : '') + '</div>' +
+            '</div>' +
+            '<div class="text-emerald-400 font-semibold shrink-0">' + esc(pkr(p.amount)) + '</div>' +
+          '</div>'
+        ));
+      });
+      wrap.appendChild(listBox);
+      return wrap;
+    }
+
+    // ---------------------------------------------------------------------
+    // Expenses
+    // ---------------------------------------------------------------------
+    function viewExpenses() {
+      var d = state.data;
+      var thisMonth = monthStr();
+      var expMonth = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+      var wrap = el('<div class="space-y-3"></div>');
+
+      wrap.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Expenses this month</div><div class="text-lg font-bold mt-1 text-red-400">' + esc(pkr(expMonth)) + '</div></div>'));
+
+      if (isOwner()) {
+        var formCard = el(
+          '<form id="expForm" class="card p-4 space-y-3">' +
+            '<div class="text-sm font-semibold text-white">Add expense</div>' +
+            '<div class="grid grid-cols-2 gap-2">' +
+              '<div><label class="block text-xs text-slate-400 mb-1">Category</label>' +
+                '<select id="eCat"><option>Rent</option><option>Utilities</option><option>Salaries</option><option>Equipment</option><option>Maintenance</option><option>Supplies</option><option>Marketing</option><option>Other</option></select></div>' +
+              '<div><label class="block text-xs text-slate-400 mb-1">Amount (PKR)</label>' +
+                '<input id="eAmt" type="number" inputmode="numeric" min="0" required /></div>' +
+            '</div>' +
+            '<div><label class="block text-xs text-slate-400 mb-1">Date</label>' +
+              '<input id="eDate" type="date" value="' + esc(todayStr()) + '" /></div>' +
+            '<div><label class="block text-xs text-slate-400 mb-1">Description</label>' +
+              '<input id="eDesc" placeholder="Optional note" /></div>' +
+            '<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl">Queue expense</button>' +
+          '</form>'
+        );
+        formCard.addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          var amt = Math.round(Number(formCard.querySelector('#eAmt').value) || 0);
+          if (amt <= 0) { toast('Enter a valid amount.', 'error'); return; }
+          sendCommand('addExpense', {
+            category: formCard.querySelector('#eCat').value,
+            amount: amt,
+            description: formCard.querySelector('#eDesc').value.trim(),
+            date: formCard.querySelector('#eDate').value || todayStr()
+          });
+          formCard.reset();
+          formCard.querySelector('#eDate').value = todayStr();
+        });
+        wrap.appendChild(formCard);
+      }
+
+      var listBox = el('<div class="space-y-2"></div>');
+      var rows = d.expenses.slice(0, 200);
+      if (!rows.length) listBox.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No expenses recorded.</div>'));
+      rows.forEach(function (e) {
+        listBox.appendChild(el(
+          '<div class="card p-3.5 flex items-center justify-between gap-3">' +
+            '<div class="min-w-0">' +
+              '<div class="font-medium text-white truncate">' + esc(e.category || 'Other') + '</div>' +
+              '<div class="text-xs text-slate-400 mt-0.5">' + esc(e.date || '') + (e.description ? ' · ' + esc(e.description) : '') + '</div>' +
+            '</div>' +
+            '<div class="text-red-400 font-semibold shrink-0">' + esc(pkr(e.amount)) + '</div>' +
+          '</div>'
+        ));
+      });
+      wrap.appendChild(listBox);
+      return wrap;
+    }
+
+    // ---------------------------------------------------------------------
+    // Reports
+    // ---------------------------------------------------------------------
+    function viewReports() {
+      var d = state.data;
+      var now = new Date();
+      var thisMonth = monthStr(now);
+      var year = String(now.getFullYear());
+
+      var revMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+      var expMonthTotal = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+      var revYear = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)).slice(0, 4) === year; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+      var expYear = d.expenses.filter(function (e) { return (e.date || '').slice(0, 4) === year; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+
+      var wrap = el('<div class="space-y-4"></div>');
+
+      // P&L this month
+      var pnlMonth = revMonth - expMonthTotal;
+      wrap.appendChild(el(
+        '<div class="card p-4">' +
+          '<div class="text-sm font-semibold text-white mb-3">Profit &amp; Loss — ' + esc(thisMonth) + '</div>' +
+          '<div class="space-y-2 text-sm">' +
+            '<div class="flex justify-between"><span class="text-slate-400">Revenue</span><span class="text-emerald-400 font-semibold">' + esc(pkr(revMonth)) + '</span></div>' +
+            '<div class="flex justify-between"><span class="text-slate-400">Expenses</span><span class="text-red-400 font-semibold">' + esc(pkr(expMonthTotal)) + '</span></div>' +
+            '<div class="border-t border-slate-700 pt-2 flex justify-between"><span class="text-white font-semibold">Net</span>' +
+              '<span class="font-bold ' + (pnlMonth >= 0 ? 'text-emerald-400' : 'text-red-400') + '">' + esc(pkr(pnlMonth)) + '</span></div>' +
+          '</div>' +
+        '</div>'
+      ));
+
+      // P&L this year
+      var pnlYear = revYear - expYear;
+      wrap.appendChild(el(
+        '<div class="card p-4">' +
+          '<div class="text-sm font-semibold text-white mb-3">Year to date — ' + esc(year) + '</div>' +
+          '<div class="space-y-2 text-sm">' +
+            '<div class="flex justify-between"><span class="text-slate-400">Revenue</span><span class="text-emerald-400 font-semibold">' + esc(pkr(revYear)) + '</span></div>' +
+            '<div class="flex justify-between"><span class="text-slate-400">Expenses</span><span class="text-red-400 font-semibold">' + esc(pkr(expYear)) + '</span></div>' +
+            '<div class="border-t border-slate-700 pt-2 flex justify-between"><span class="text-white font-semibold">Net</span>' +
+              '<span class="font-bold ' + (pnlYear >= 0 ? 'text-emerald-400' : 'text-red-400') + '">' + esc(pkr(pnlYear)) + '</span></div>' +
+          '</div>' +
+        '</div>'
+      ));
+
+      // Expenses by category (this year)
+      var byCat = {};
+      d.expenses.filter(function (e) { return (e.date || '').slice(0, 4) === year; }).forEach(function (e) {
+        var c = e.category || 'Other'; byCat[c] = (byCat[c] || 0) + (Number(e.amount) || 0);
+      });
+      var cats = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
+      var catCard = el('<div class="card p-4"><div class="text-sm font-semibold text-white mb-3">Expenses by category — ' + esc(year) + '</div></div>');
+      if (!cats.length) catCard.appendChild(el('<div class="text-slate-500 text-sm">No expenses this year.</div>'));
+      else {
+        var maxV = byCat[cats[0]] || 1;
+        var rowsBox = el('<div class="space-y-2.5"></div>');
+        cats.forEach(function (c) {
+          var pct = Math.round((byCat[c] / maxV) * 100);
+          rowsBox.appendChild(el(
+            '<div>' +
+              '<div class="flex justify-between text-xs mb-1"><span class="text-slate-300">' + esc(c) + '</span><span class="text-slate-400">' + esc(pkr(byCat[c])) + '</span></div>' +
+              '<div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-indigo-500" style="width:' + pct + '%"></div></div>' +
+            '</div>'
+          ));
+        });
+        catCard.appendChild(rowsBox);
+      }
+      wrap.appendChild(catCard);
+
+      return wrap;
+    }
+
+    // ---------------------------------------------------------------------
+    // Service worker registration
+    // ---------------------------------------------------------------------
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function (e) { /* ignore */ });
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    // Boot
+    // ---------------------------------------------------------------------
+    function boot() {
+      render(); // shows login or loading immediately
+      if (state.token) {
+        refresh().catch(function () { /* handled */ });
+      }
+    }
+    boot();
+  })();
+  </script>
+</body>
+</html>
