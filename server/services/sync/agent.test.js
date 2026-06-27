@@ -229,6 +229,29 @@ test('applyCommand editMember updates fields', async () => {
   assert.equal(m.type, 'Premium');
 });
 
+test('applyCommand addMember inserts a member with the next A### code', async () => {
+  await seedDb();
+  agent._setDeps({ db, logErr: noopLog });
+  const before = db.prepare('SELECT COUNT(*) c FROM members').get().c; // A001, A002 seeded
+  const r = agent.applyCommand({ type: 'addMember', payload: JSON.stringify({ name: 'Carol', phone: '0500000099', type: 'Premium' }) });
+  const after = db.prepare('SELECT COUNT(*) c FROM members').get().c;
+  assert.equal(after, before + 1, 'a member row was inserted');
+  assert.equal(r.code, 'A003', 'next code follows the highest existing code');
+  const m = db.prepare('SELECT * FROM members WHERE code=?').get('A003');
+  assert.equal(m.name, 'Carol');
+  assert.equal(m.phone, '0500000099');
+  assert.equal(m.type, 'Premium');
+  assert.equal(m.suspended, 0);
+  assert.equal(m.fingerprint, 0);
+  assert.ok(m.join_date, 'join_date set to today');
+});
+
+test('applyCommand addMember requires a name', async () => {
+  await seedDb();
+  agent._setDeps({ db, logErr: noopLog });
+  assert.throws(() => agent.applyCommand({ type: 'addMember', payload: JSON.stringify({ phone: '0300' }) }), /name is required/);
+});
+
 test('applyCommand updateSettings merges into settings', async () => {
   await seedDb();
   agent._setDeps({ db, logErr: noopLog });

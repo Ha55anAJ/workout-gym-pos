@@ -203,6 +203,15 @@ function applyCommand(cmd) {
         .run(code, p.date || today(), category, p.description || (category + ' expense'), Math.round(Number(p.amount) || 0), 'Cloud');
       return { expenseCode: code, category, amount: Math.round(Number(p.amount) || 0) };
     }
+    case 'addMember': {
+      // Mirrors POST /api/members: insert a new member with the next "A###" code.
+      const name = (p.name || '').trim();
+      if (!name) throw new Error('name is required');
+      const code = nextCode('A', 'members', 3);
+      db.prepare('INSERT INTO members(code,name,phone,type,join_date,last_payment,suspended,fingerprint,fp_samples,fp_enrolled_at) VALUES (?,?,?,?,?,?,0,0,0,NULL)')
+        .run(code, name, p.phone || '', p.type || 'Basic', today(), null);
+      return { code, name, type: p.type || 'Basic' };
+    }
     case 'editMember': {
       const m = mustMember(p.code);
       db.prepare('UPDATE members SET name=?, phone=?, type=? WHERE id=?')

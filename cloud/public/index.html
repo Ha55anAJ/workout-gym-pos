@@ -1,742 +1,753 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#4f46e5" />
-  <meta name="description" content="Demo Gym owner dashboard" />
-  <title>Demo Gym</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Demo Gym — Management System</title>
 
-  <!-- PWA -->
-  <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/icon-192.png" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Demo Gym" />
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#185fa5" />
+<link rel="icon" href="/icon-192.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Demo Gym" />
 
-  <!-- Tailwind + Chart.js via cdnjs (whitelisted in helmet CSP) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/3.4.5/tailwind.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<!-- Self-hosted assets (Tailwind precompiled, Chart.js, Lucide, Inter) for reliability, CSP + offline -->
+<link rel="stylesheet" href="/app.css" />
+<script src="/chart.umd.js"></script>
+<script src="/lucide.min.js"></script>
 
-  <style>
-    :root { color-scheme: dark; }
-    html, body { height: 100%; }
-    body {
-      background: #0f172a;
-      color: #e2e8f0;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; }
-    .tabbtn.active { color: #818cf8; }
-    .tabbtn.active .tabicon { background: rgba(129,140,248,.15); }
-    input, select, textarea {
-      background: #0f172a; border: 1px solid #334155; color: #e2e8f0;
-      border-radius: .6rem; padding: .55rem .7rem; width: 100%; outline: none;
-    }
-    input:focus, select:focus, textarea:focus { border-color: #6366f1; }
-    button { font: inherit; }
-    .badge { font-size: .68rem; padding: .12rem .5rem; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
-    .b-active { background: rgba(34,197,94,.15); color: #4ade80; }
-    .b-due    { background: rgba(234,179,8,.15);  color: #facc15; }
-    .b-susp   { background: rgba(239,68,68,.15);  color: #f87171; }
-    .spin { width: 22px; height: 22px; border: 3px solid #334155; border-top-color: #818cf8; border-radius: 50%; animation: r 0.8s linear infinite; }
-    @keyframes r { to { transform: rotate(360deg); } }
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
-    .toast-in { animation: ti .25s ease-out; }
-    @keyframes ti { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  </style>
+<style>
+  /* Self-hosted Inter (weights 400/500/600/700) */
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/inter-400.woff2') format('woff2'); }
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/inter-500.woff2') format('woff2'); }
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/inter-600.woff2') format('woff2'); }
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/inter-700.woff2') format('woff2'); }
+  html, body { height: 100%; }
+  body { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #111827; background: #f3f4f6; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  table.dense td, table.dense th { font-size: 13px; }
+  .nav-item { transition: background .12s ease, color .12s ease; }
+  .row-hover:hover { background: #f9fafb; }
+  .slideover-panel { transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; background-clip: padding-box; }
+  thead.sticky th { position: sticky; top: 0; z-index: 5; }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid #185fa5; outline-offset: 1px; }
+  .scan-pulse { animation: scanpulse 1.6s ease-in-out infinite; }
+  @keyframes scanpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(24,95,165,.20); } 50% { box-shadow: 0 0 0 16px rgba(24,95,165,0); } }
+  .flash-ok { animation: flashok .6s ease; } @keyframes flashok { 0% { background:#dcfce7; } 100% { background:#fff; } }
+  .flash-bad { animation: flashbad .6s ease; } @keyframes flashbad { 0% { background:#fee2e2; } 100% { background:#fff; } }
+  #print-area { display: none; }
+  @media print { body * { visibility: hidden !important; } #print-area, #print-area * { visibility: visible !important; } #print-area { display:block !important; position:absolute; left:0; top:0; width:100%; } .no-print { display:none !important; } }
+</style>
 </head>
-<body>
-  <!-- App title marker for tests: id="app" + "Demo Gym" -->
-  <div id="app"></div>
+<body class="text-ink">
+  <div id="app" class="flex h-screen overflow-hidden">
+    <div class="m-auto text-center text-sub"><div class="text-sm">Loading Demo Gym…</div></div>
+  </div>
 
-  <!-- Toast region -->
-  <div id="toasts" class="fixed left-0 right-0 bottom-20 z-50 flex flex-col items-center gap-2 px-4 pointer-events-none"></div>
+  <!-- Login gate: shown when there is no valid token. Same visual language as the app. -->
+  <div id="login" class="fixed inset-0 z-[70] hidden items-center justify-center bg-panel p-6">
+    <div class="w-full max-w-sm rounded-2xl border border-line bg-white p-7 shadow-sm">
+      <div class="flex items-center gap-2.5">
+        <span class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white font-bold">D</span>
+        <div class="leading-tight"><div class="text-[16px] font-semibold">Demo Gym</div><div class="text-[11px] text-sub">Owner dashboard</div></div>
+      </div>
+      <h1 class="mt-6 text-lg font-semibold">Sign in</h1>
+      <p class="mt-1 text-[13px] text-sub">Use your owner account to access analytics and controls.</p>
+      <form id="login-form" onsubmit="return doLogin(event)" class="mt-5 space-y-4">
+        <div><div class="text-[12px] font-medium text-sub mb-1">Username</div><input id="login-user" autocomplete="username" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="owner" /></div>
+        <div><div class="text-[12px] font-medium text-sub mb-1">Password</div><input id="login-pass" type="password" autocomplete="current-password" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="••••••••" /></div>
+        <div id="login-error" class="hidden text-[13px] text-red-600"></div>
+        <button type="submit" id="login-btn" class="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Sign in</button>
+      </form>
+    </div>
+  </div>
 
-  <noscript><div style="padding:2rem">Demo Gym dashboard requires JavaScript.</div></noscript>
+  <div id="slideover" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/30" onclick="closeSlide()"></div>
+    <div id="slideover-panel" class="slideover-panel absolute right-0 top-0 h-full w-full max-w-[640px] translate-x-full bg-white shadow-2xl flex flex-col"></div>
+  </div>
+  <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-6">
+    <div class="absolute inset-0 bg-black/40" onclick="closeModal()"></div>
+    <div id="modal-card" class="relative z-10 max-h-[90vh] overflow-auto"></div>
+  </div>
+  <div id="toast" class="fixed bottom-6 right-6 z-[60] hidden">
+    <div class="flex items-center gap-2 rounded-lg bg-ink px-4 py-3 text-sm text-white shadow-lg">
+      <i data-lucide="check-circle-2" class="h-4 w-4 text-green-400"></i><span id="toast-msg">Done</span>
+    </div>
+  </div>
+  <div id="print-area"></div>
 
-  <script>
-  'use strict';
-  (function () {
-    // ---------------------------------------------------------------------
-    // Tiny utilities
-    // ---------------------------------------------------------------------
-    var TOKEN_KEY = 'demoGym.token';
-    var ACCT_KEY = 'demoGym.account';
-    var state = {
-      token: localStorage.getItem(TOKEN_KEY) || null,
-      account: safeParse(localStorage.getItem(ACCT_KEY)),
-      data: null,        // bootstrap payload
-      view: 'dashboard',
-      memberSearch: '',
-      memberFilter: 'all',
-      loading: false
-    };
-    var chart = null;
+<script>
+/* ============================================================================
+   DEMO GYM — frontend. Same UI as the approved demo, now backed by the local
+   server (Express + SQLite) and the ZK9500 fingerprint service.
+   Data is loaded from /api/bootstrap; every change is persisted via the API.
+   ========================================================================== */
 
-    function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
-    function $(sel, root) { return (root || document).querySelector(sel); }
-    function el(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
-    function esc(s) {
-      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
-    }
-    function isOwner() { return state.account && state.account.role === 'Owner'; }
+/* ---- runtime config (filled by bootstrap) ---- */
+let GYM = {}, TIERS = {}, POLICY = { cycleDays: 30, dueSoonDays: 5 };
+let TODAY = new Date();
+let VERSION = '1.0.0';
+let fpStatus = { mode: 'simulation', device: '', samplesRequired: 3 };
+let ENROLL_SAMPLES = 3;
 
-    // Currency: PKR integers
-    function pkr(n) {
-      n = Math.round(Number(n) || 0);
-      return 'Rs ' + n.toLocaleString('en-PK');
-    }
-    function todayStr() { return new Date().toISOString().slice(0, 10); }       // YYYY-MM-DD
-    function monthStr(d) { return (d || new Date()).toISOString().slice(0, 7); } // YYYY-MM
+let members = [], payments = [], expenses = [], staff = [], users = [], checkins = [], staffCheckins = [];
+let LOGO = null;
 
-    // ---------------------------------------------------------------------
-    // API layer
-    // ---------------------------------------------------------------------
-    function api(path, opts) {
-      opts = opts || {};
-      var headers = Object.assign({}, opts.headers || {});
-      if (state.token) headers['authorization'] = 'Bearer ' + state.token;
-      if (opts.body != null) headers['content-type'] = 'application/json';
-      return fetch('/api' + path, {
-        method: opts.method || 'GET',
-        headers: headers,
-        body: opts.body != null ? JSON.stringify(opts.body) : undefined
-      }).then(function (res) {
-        if (res.status === 401) { logout(true); throw new Error('Session expired'); }
-        return res.json().catch(function () { return {}; }).then(function (j) {
-          if (!res.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
-          return j;
-        });
-      });
-    }
+const TIER_NAMES = ['Basic', 'Premium', 'Student', 'Family'];
+const METHODS = ['Cash', 'Card', 'Easypaisa', 'JazzCash'];
 
-    function login(username, password) {
-      return api('/auth/login', { method: 'POST', body: { username: username, password: password } })
-        .then(function (r) {
-          state.token = r.token;
-          state.account = r.account;
-          localStorage.setItem(TOKEN_KEY, r.token);
-          localStorage.setItem(ACCT_KEY, JSON.stringify(r.account));
-        });
-    }
+/* ---- small date / format helpers ---- */
+const DAY = 86400000;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const pad = (n) => String(n).padStart(2, '0');
+const addDays = (d, n) => new Date(d.getTime() + n * DAY);
+const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a, b) => Math.round((stripTime(b) - stripTime(a)) / DAY);
+function fmtDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function fmtDateLong(d) { return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+function fmtMonth(d) { return MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+function fmtTime(d) { let h = d.getHours(), m = d.getMinutes(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + pad(m) + ' ' + ap; }
+function pkr(n) { return 'PKR ' + Math.round(n).toLocaleString('en-US'); }
+function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+function initials(name) { const p = name.trim().split(/\s+/); return ((p[0]?.[0] || '') + (p[1]?.[0] || p[0]?.[1] || '')).toUpperCase(); }
+function avatarColor(seed) {
+  const c = ['#185fa5','#0f766e','#7c3aed','#b45309','#be123c','#1d4ed8','#15803d','#a16207','#9333ea','#0e7490'];
+  let h = 0; for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0; return c[Math.abs(h) % c.length];
+}
+function dOnly(s) { if (!s) return null; const p = String(s).slice(0, 10).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12, 0, 0); }
+function dTime(s) { return s ? new Date(s) : null; }
 
-    function logout(silent) {
-      state.token = null; state.account = null; state.data = null;
-      localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ACCT_KEY);
-      if (!silent) toast('Signed out.');
-      render();
-    }
+/* ---- derived ---- */
+function statusOf(m) {
+  if (!m.lastPayment) return 'Not enrolled';
+  if (m.suspended) return 'Suspended';
+  const due = addDays(m.lastPayment, POLICY.cycleDays);
+  const dleft = daysBetween(TODAY, due);
+  if (dleft < 0) return 'Overdue';
+  if (dleft <= POLICY.dueSoonDays) return 'Due soon';
+  return 'Paid';
+}
+function dueDateOf(m) { return m.lastPayment ? addDays(m.lastPayment, POLICY.cycleDays) : null; }
+function daysOverdue(m) { const due = dueDateOf(m); return due ? Math.max(0, daysBetween(due, TODAY)) : 0; }
 
-    function loadBootstrap() {
-      return api('/bootstrap').then(function (d) { state.data = normalize(d); return state.data; });
-    }
+const STATUS_STYLE = { 'Paid':'bg-green-100 text-green-800','Due soon':'bg-amber-100 text-amber-800','Overdue':'bg-red-100 text-red-700','Not enrolled':'bg-gray-100 text-gray-600','Suspended':'bg-gray-200 text-gray-700' };
+function pill(s) { return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ' + (STATUS_STYLE[s] || 'bg-gray-100 text-gray-600') + '">' + s + '</span>'; }
+const CAT_STYLE = { 'Rent':'bg-indigo-50 text-indigo-700','Salaries':'bg-blue-50 text-blue-700','Utilities':'bg-cyan-50 text-cyan-700','Equipment':'bg-violet-50 text-violet-700','Supplies':'bg-teal-50 text-teal-700','Marketing':'bg-amber-50 text-amber-700','Maintenance':'bg-orange-50 text-orange-700','Other':'bg-gray-100 text-gray-600' };
+function catTag(c) { return '<span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ' + (CAT_STYLE[c] || 'bg-gray-100 text-gray-600') + '">' + c + '</span>'; }
+function avatar(name, size) { size = size || 28; const fs = Math.round(size * 0.4); return '<span class="inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white" style="width:' + size + 'px;height:' + size + 'px;font-size:' + fs + 'px;background:' + avatarColor(name) + '">' + initials(name) + '</span>'; }
 
-    // Normalize / precompute helpers on the raw snake_case bootstrap.
-    function normalize(d) {
-      d = d || {};
-      d.settings = d.settings || {};
-      d.members = d.members || [];
-      d.payments = d.payments || [];
-      d.expenses = d.expenses || [];
-      d.checkins = d.checkins || [];
-      d.staff = d.staff || [];
-      d.policy = (d.settings && d.settings.policy) || { cycleDays: 30, dueSoonDays: 5 };
-      return d;
-    }
+function collectedToday() { return payments.filter(p => daysBetween(p.date, TODAY) === 0).reduce((t, p) => t + p.amount, 0); }
+function checkinsOn(d) { return checkins.filter(c => daysBetween(c.at, d) === 0).length; }
+function activeMemberCount() { return members.filter(m => !m.suspended && m.lastPayment).length; }
+function joinedThisMonth() { return members.filter(m => m.joinDate.getMonth() === TODAY.getMonth() && m.joinDate.getFullYear() === TODAY.getFullYear()).length; }
+function outstandingTotal() {
+  return members.reduce((t, m) => { const s = statusOf(m);
+    if (s === 'Overdue') return t + TIERS[m.type] * Math.min(6, Math.ceil(daysOverdue(m) / 30));
+    if (s === 'Due soon') return t + TIERS[m.type]; return t; }, 0);
+}
+function memberSpend(id) { return payments.filter(p => p.memberId === id).reduce((t, p) => t + p.amount, 0); }
+function memberVisits(id, days) { const since = addDays(TODAY, -days); return checkins.filter(c => c.memberId === id && c.at >= since).length; }
+function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, d.getDate(), 12, 0, 0); }
+function paidOnOrAfter(id, date) { const t = stripTime(date).getTime(); return payments.some(p => p.memberId === id && stripTime(p.date).getTime() >= t); }
+function monthlySeries(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1); const key = monthKey(base);
+    const rev = payments.filter(p => monthKey(p.date) === key).reduce((t, p) => t + p.amount, 0);
+    const exp = expenses.filter(e => monthKey(e.date) === key).reduce((t, e) => t + e.amount, 0);
+    const paidCount = new Set(payments.filter(p => monthKey(p.date) === key).map(p => p.memberId)).size;
+    const payCount = payments.filter(p => monthKey(p.date) === key).length;
+    out.push({ label: MONTHS[base.getMonth()] + ' ' + String(base.getFullYear()).slice(2), date: base, rev, exp, paidCount, payCount });
+  }
+  return out;
+}
+function dailyCheckinSeries(n) { const out = []; for (let i = n - 1; i >= 0; i--) { const d = addDays(TODAY, -i); out.push({ d, count: checkinsOn(d) }); } return out; }
+function dailyCollectionSeries(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) { const d = addDays(TODAY, -i); const bm = {}; METHODS.forEach(m => bm[m] = 0);
+    payments.filter(p => daysBetween(p.date, d) === 0).forEach(p => bm[p.method] += p.amount);
+    out.push({ d, byMethod: bm, total: Object.values(bm).reduce((a, b) => a + b, 0) }); }
+  return out;
+}
 
-    // Member status: suspended==1 -> Suspended; else lapsed if no/old payment.
-    function memberStatus(m, policy) {
-      if (Number(m.suspended) === 1) return 'suspended';
-      var cycle = (policy && policy.cycleDays) || 30;
-      if (!m.last_payment) return 'due';
-      var last = new Date(m.last_payment + (m.last_payment.length <= 10 ? 'T00:00:00' : ''));
-      if (isNaN(last.getTime())) return 'due';
-      var days = (Date.now() - last.getTime()) / 86400000;
-      return days > cycle ? 'due' : 'active';
-    }
-    function statusBadge(st) {
-      if (st === 'active') return '<span class="badge b-active">Active</span>';
-      if (st === 'suspended') return '<span class="badge b-susp">Suspended</span>';
-      return '<span class="badge b-due">Due</span>';
-    }
+/* ---- auth / token ---- */
+const TOKEN_KEY = 'demoGymToken', ACCOUNT_KEY = 'demoGymAccount';
+function getToken() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } }
+function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+function getAccount() { try { return JSON.parse(localStorage.getItem(ACCOUNT_KEY) || 'null'); } catch (e) { return null; } }
+function setAccount(a) { try { a ? localStorage.setItem(ACCOUNT_KEY, JSON.stringify(a)) : localStorage.removeItem(ACCOUNT_KEY); } catch (e) {} }
 
-    // ---------------------------------------------------------------------
-    // Toasts
-    // ---------------------------------------------------------------------
-    function toast(msg, kind) {
-      var color = kind === 'error' ? 'bg-red-600' : (kind === 'ok' ? 'bg-indigo-600' : 'bg-slate-700');
-      var t = el('<div class="toast-in pointer-events-auto ' + color +
-        ' text-white text-sm px-4 py-2.5 rounded-xl shadow-lg max-w-sm text-center">' + esc(msg) + '</div>');
-      $('#toasts').appendChild(t);
-      setTimeout(function () { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 320); }, 3200);
-    }
+/* ---- API helper (JWT bearer; 401 → re-login) ---- */
+async function api(path, opts) {
+  opts = opts || {};
+  const o = { method: opts.method || 'GET', headers: {} };
+  const tok = getToken();
+  if (tok) o.headers['Authorization'] = 'Bearer ' + tok;
+  if (opts.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opts.body); }
+  const r = await fetch('/api' + path, o);
+  if (r.status === 401) { setToken(null); setAccount(null); showLogin(); throw new Error('Session expired — please sign in again.'); }
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('application/json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+  return data;
+}
 
-    // Issue an owner command, then refresh bootstrap after a short delay.
-    function sendCommand(type, payload) {
-      if (!isOwner()) { toast('Only the owner can do that.', 'error'); return Promise.resolve(); }
-      return api('/commands', { method: 'POST', body: { type: type, payload: payload || {} } })
-        .then(function () {
-          toast('Queued — will apply on the gym laptop shortly.', 'ok');
-          setTimeout(function () { refresh(true); }, 1500);
-        })
-        .catch(function (e) { toast(e.message || 'Command failed', 'error'); });
-    }
+/* ---- cloud command queue: owner writes are enqueued, the laptop applies + syncs back ---- */
+async function cloudCmd(type, payload, msg) {
+  await api('/commands', { method: 'POST', body: { type, payload } });
+  toast(msg || 'Queued — will apply on the gym laptop shortly');
+  if (typeof closeSlide === 'function') closeSlide();
+  if (typeof closeModal === 'function') closeModal();
+  setTimeout(refreshAll, 1500);
+}
+async function refreshAll() {
+  try { await loadBootstrap(); render(); } catch (e) { /* api() already handles 401 */ }
+}
+function reviveMember(m) { m.joinDate = dOnly(m.joinDate); m.lastPayment = dOnly(m.lastPayment); m.fingerprintEnrolledAt = dOnly(m.fingerprintEnrolledAt); return m; }
+function revivePayment(p) { p.date = dOnly(p.date); return p; }
+function reviveExpense(e) { e.date = dOnly(e.date); return e; }
+function reviveCheckin(c) { c.at = dTime(c.at); return c; }
 
-    function refresh(quiet) {
-      if (!state.token) return Promise.resolve();
-      if (!quiet) setLoading(true);
-      return loadBootstrap().then(function () { render(); }).catch(function (e) {
-        if (state.token) toast(e.message || 'Failed to load', 'error');
-      }).finally(function () { setLoading(false); });
-    }
-    function setLoading(v) { state.loading = v; var b = $('#refreshBtn'); if (b) b.classList.toggle('opacity-40', v); }
+async function loadBootstrap() {
+  const b = await api('/bootstrap');
+  GYM = b.settings.gym; TIERS = b.settings.tiers; POLICY = b.settings.policy; VERSION = b.settings.version;
+  LOGO = b.settings.logo || null;
+  TODAY = dOnly(b.today);
+  fpStatus = b.fingerprint; ENROLL_SAMPLES = fpStatus.samplesRequired || 3;
+  members = b.members.map(reviveMember);
+  payments = b.payments.map(revivePayment);
+  expenses = b.expenses.map(reviveExpense);
+  staff = b.staff;
+  users = b.users || [];
+  checkins = b.checkins.map(reviveCheckin);
+  staffCheckins = (b.staffCheckins || []).map((c) => { c.at = dTime(c.at); return c; });
+  const acct = getAccount();
+  state.role = (acct && acct.role) || 'Owner';
+  if (!canSee(state.page)) state.page = 'dashboard';
+  document.title = (GYM.name || 'Demo Gym') + ' — Management System';
+}
 
-    // ---------------------------------------------------------------------
-    // Render: top-level router
-    // ---------------------------------------------------------------------
-    function render() {
-      var root = $('#app');
-      if (!state.token) { root.innerHTML = ''; root.appendChild(loginScreen()); return; }
-      if (!state.data) { root.innerHTML = ''; root.appendChild(loadingScreen()); return; }
-      root.innerHTML = '';
-      root.appendChild(shell());
-    }
+/* ---- state + nav ---- */
+const state = { role: 'Owner', page: 'dashboard', userMenuOpen: false, memberSearch: '', memberFilter: 'All', payMethod: 'All', paySearch: '', payFrom: '', payTo: '', expCat: 'All', expFrom: '', expTo: '', lastBackup: null };
+const ROLE_USER = { Owner: 'Owner', Receptionist: 'Receptionist' };
+// Owner analytics/business views only. Scan removed (no fingerprint reader in the cloud).
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', roles: ['Owner', 'Receptionist'] },
+  { id: 'members', label: 'Members', icon: 'users', roles: ['Owner', 'Receptionist'] },
+  { id: 'payments', label: 'Payments', icon: 'wallet', roles: ['Owner', 'Receptionist'] },
+  { id: 'expenses', label: 'Expenses', icon: 'receipt', roles: ['Owner'] },
+  { id: 'reports', label: 'Reports', icon: 'bar-chart-3', roles: ['Owner'] },
+  { id: 'staff', label: 'Staff', icon: 'id-card', roles: ['Owner'] },
+  { id: 'settings', label: 'Settings', icon: 'settings', roles: ['Owner'] }
+];
+function canSee(p) { const n = NAV.find(x => x.id === p); return n && n.roles.includes(state.role); }
+const PAGES = {};
+function go(p) { if (!canSee(p)) p = 'dashboard'; state.page = p; state.userMenuOpen = false; render(); }
+function toggleUserMenu() { state.userMenuOpen = !state.userMenuOpen; render(); }
 
-    function loadingScreen() {
-      return el('<div class="min-h-screen flex flex-col items-center justify-center gap-3">' +
-        '<div class="spin"></div><div class="text-slate-400 text-sm">Loading Demo Gym…</div></div>');
-    }
+/* ---- render root ---- */
+function render() {
+  const nav = NAV.filter(n => n.roles.includes(state.role));
+  const pageTitle = (NAV.find(n => n.id === state.page) || {}).label || '';
+  const sidebar = `
+    <nav class="flex w-[240px] shrink-0 flex-col border-r border-line bg-white">
+      <div class="flex items-center gap-2.5 px-5 h-16 border-b border-line">
+        ${LOGO ? `<img src="${LOGO}" class="h-8 w-8 rounded-lg object-cover" alt="logo" />` : `<span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white font-bold">${(GYM.name || 'D').trim().charAt(0).toUpperCase()}</span>`}
+        <div class="leading-tight"><div class="text-[15px] font-semibold">${GYM.name || 'Demo Gym'}</div><div class="text-[11px] text-sub">${GYM.city || ''}</div></div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
+        ${nav.map(n => `<button onclick="go('${n.id}')" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium ${state.page === n.id ? 'bg-accent-soft text-accent' : 'text-gray-700 hover:bg-gray-100'}"><i data-lucide="${n.icon}" class="h-[18px] w-[18px]"></i>${n.label}</button>`).join('')}
+      </div>
+      <div class="border-t border-line p-3 text-[11px] text-sub">
+        <div class="flex items-center gap-1.5"><i data-lucide="cloud" class="h-3.5 w-3.5 text-accent"></i> Cloud dashboard</div>
+        <div class="mt-1">Synced from the gym laptop</div>
+      </div>
+    </nav>`;
+  const acct = getAccount() || {};
+  const acctName = acct.name || acct.username || state.role;
+  const header = `
+    <header class="flex h-16 shrink-0 items-center justify-between border-b border-line bg-white px-6">
+      <div><h1 class="text-lg font-semibold leading-none">${pageTitle}</h1><p class="mt-1 text-[12px] text-sub">${fmtDateLong(TODAY)}</p></div>
+      <div class="relative">
+        <button onclick="toggleUserMenu()" class="flex items-center gap-2.5 rounded-lg border border-line px-2.5 py-1.5 text-sm hover:bg-gray-50">
+          ${avatar(acctName, 28)}
+          <span class="text-left leading-tight"><span class="block text-[12px] text-sub">Signed in as</span><span class="block font-medium">${acctName}</span></span>
+          <i data-lucide="chevron-down" class="h-4 w-4 text-sub"></i>
+        </button>
+        ${state.userMenuOpen ? `<div class="absolute right-0 mt-1 w-60 rounded-lg border border-line bg-white p-1.5 shadow-lg z-20">
+          <div class="flex items-center gap-2 px-2 py-2"><span class="flex items-center gap-2">${avatar(acctName, 24)} <span class="leading-tight"><span class="block font-medium text-sm">${acctName}</span><span class="block text-[11px] text-sub">${acct.role || state.role}</span></span></span></div>
+          <div class="my-1 border-t border-line"></div>
+          <button onclick="logout()" class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-gray-100"><i data-lucide="log-out" class="h-4 w-4 text-sub"></i><span class="font-medium">Logout</span></button>
+        </div>` : ''}
+      </div>
+    </header>`;
+  document.getElementById('app').innerHTML = `${sidebar}<main class="flex flex-1 flex-col overflow-hidden">${header}<div id="page" class="flex-1 overflow-y-auto bg-panel p-6"></div></main>`;
+  const page = PAGES[state.page] || PAGES.dashboard;
+  document.getElementById('page').innerHTML = page.render();
+  if (typeof page.mount === 'function') page.mount();
+  if (window.lucide) lucide.createIcons();
+}
+function kpiCard(label, value, sub, subColor) { return `<div class="rounded-xl border border-line bg-white p-5"><div class="text-[12px] font-medium text-sub">${label}</div><div class="mt-2 text-[26px] font-semibold leading-none">${value}</div>${sub ? `<div class="mt-2 text-[12px] font-medium ${subColor || 'text-sub'}">${sub}</div>` : ''}</div>`; }
+function emptyState(icon, text) { return `<div class="flex flex-col items-center justify-center py-12 text-center text-sub"><i data-lucide="${icon}" class="h-8 w-8 mb-2 opacity-50"></i><div class="text-sm">${text}</div></div>`; }
+function card(title, body, action) { return `<section class="rounded-xl border border-line bg-white"><div class="flex items-center justify-between border-b border-line px-5 py-3"><h2 class="text-sm font-semibold">${title}</h2>${action || ''}</div><div class="p-5">${body}</div></section>`; }
 
-    // ---------------------------------------------------------------------
-    // Login screen
-    // ---------------------------------------------------------------------
-    function loginScreen() {
-      var wrap = el(
-        '<div class="min-h-screen flex flex-col justify-center px-6 max-w-md mx-auto w-full">' +
-          '<div class="text-center mb-8">' +
-            '<div class="mx-auto mb-4 w-16 h-16 rounded-2xl flex items-center justify-center" style="background:linear-gradient(160deg,#6366f1,#4f46e5)">' +
-              '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>' +
-            '</div>' +
-            '<h1 class="text-2xl font-bold text-white">Demo Gym</h1>' +
-            '<p class="text-slate-400 text-sm mt-1">Owner dashboard</p>' +
-          '</div>' +
-          '<form id="loginForm" class="card p-5 space-y-4">' +
-            '<div><label class="block text-xs font-medium text-slate-400 mb-1">Username</label>' +
-              '<input id="u" autocomplete="username" autocapitalize="none" required /></div>' +
-            '<div><label class="block text-xs font-medium text-slate-400 mb-1">Password</label>' +
-              '<input id="p" type="password" autocomplete="current-password" required /></div>' +
-            '<div id="loginErr" class="text-red-400 text-sm hidden"></div>' +
-            '<button type="submit" id="loginBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl transition">Sign in</button>' +
-          '</form>' +
-          '<p class="text-center text-slate-600 text-xs mt-6">Demo Gym · PKR</p>' +
-        '</div>'
-      );
-      wrap.querySelector('#loginForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var btn = wrap.querySelector('#loginBtn');
-        var errBox = wrap.querySelector('#loginErr');
-        errBox.classList.add('hidden');
-        btn.disabled = true; btn.textContent = 'Signing in…';
-        login(wrap.querySelector('#u').value.trim(), wrap.querySelector('#p').value)
-          .then(function () { return refresh(); })
-          .then(function () { render(); })
-          .catch(function (err) {
-            errBox.textContent = /credential/i.test(err.message) ? 'Invalid username or password.' : (err.message || 'Login failed');
-            errBox.classList.remove('hidden');
-            btn.disabled = false; btn.textContent = 'Sign in';
-          });
-      });
-      return wrap;
-    }
-
-    // ---------------------------------------------------------------------
-    // App shell (header + view + bottom tab bar)
-    // ---------------------------------------------------------------------
-    var TABS = [
-      { id: 'dashboard', label: 'Home', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
-      { id: 'members', label: 'Members', icon: 'M17 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M21 20v-2a4 4 0 0 0-3-3.87' },
-      { id: 'payments', label: 'Payments', icon: 'M2 7h20v10H2zM2 11h20M6 15h4' },
-      { id: 'expenses', label: 'Expenses', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
-      { id: 'reports', label: 'Reports', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' }
+/* ============================ PAGES ============================ */
+/* ---- Dashboard ---- */
+PAGES.dashboard = {
+  render() {
+    const owner = state.role === 'Owner';
+    const kpis = [
+      kpiCard('Members active', activeMemberCount(), '+' + joinedThisMonth() + ' this month', 'text-green-600'),
+      kpiCard("Today's check-ins", checkinsOn(TODAY), 'Updated live', 'text-sub')
     ];
-
-    function shell() {
-      var root = el('<div class="max-w-3xl mx-auto pb-24"></div>');
-
-      // Header
-      var gymName = (state.data.settings.gym && state.data.settings.gym.name) || 'Demo Gym';
-      var header = el(
-        '<header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between" style="padding-top:max(.75rem,env(safe-area-inset-top))">' +
-          '<div class="flex items-center gap-2 min-w-0">' +
-            '<div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center" style="background:linear-gradient(160deg,#6366f1,#4f46e5)">' +
-              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M6.5 7v10M17.5 7v10M4 9.5v5M20 9.5v5M6.5 12h11"/></svg>' +
-            '</div>' +
-            '<div class="min-w-0"><div class="font-bold text-white leading-tight truncate">' + esc(gymName) + '</div>' +
-              '<div class="text-[11px] text-slate-400 leading-tight truncate">' + esc(state.account.name || state.account.username) + ' · ' + esc(state.account.role) + '</div></div>' +
-          '</div>' +
-          '<div class="flex items-center gap-1.5">' +
-            '<button id="refreshBtn" title="Refresh" class="p-2 rounded-lg hover:bg-slate-800 text-slate-300"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg></button>' +
-            '<button id="logoutBtn" title="Sign out" class="p-2 rounded-lg hover:bg-slate-800 text-slate-300"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>' +
-          '</div>' +
-        '</header>'
-      );
-      header.querySelector('#refreshBtn').addEventListener('click', function () { refresh(); });
-      header.querySelector('#logoutBtn').addEventListener('click', function () { logout(); });
-      root.appendChild(header);
-
-      // View body
-      var body = el('<main class="px-4 py-4"></main>');
-      var v = state.view;
-      if (v === 'dashboard') body.appendChild(viewDashboard());
-      else if (v === 'members') body.appendChild(viewMembers());
-      else if (v === 'payments') body.appendChild(viewPayments());
-      else if (v === 'expenses') body.appendChild(viewExpenses());
-      else if (v === 'reports') body.appendChild(viewReports());
-      root.appendChild(body);
-
-      // Bottom tab bar
-      var nav = el('<nav class="fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur border-t border-slate-800 flex" style="padding-bottom:env(safe-area-inset-bottom)"></nav>');
-      TABS.forEach(function (t) {
-        var b = el(
-          '<button class="tabbtn flex-1 flex flex-col items-center gap-0.5 py-2 text-slate-400 ' + (v === t.id ? 'active' : '') + '">' +
-            '<span class="tabicon rounded-lg px-3 py-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + t.icon + '"/></svg></span>' +
-            '<span class="text-[10px] font-medium">' + t.label + '</span>' +
-          '</button>'
-        );
-        b.addEventListener('click', function () { state.view = t.id; render(); window.scrollTo(0, 0); });
-        nav.appendChild(b);
-      });
-      root.appendChild(nav);
-      return root;
+    if (owner) {
+      kpis.push(kpiCard('Collected today', pkr(collectedToday()), 'Across all methods', 'text-sub'));
+      kpis.push(kpiCard('Outstanding fees', pkr(outstandingTotal()), members.filter(m => statusOf(m) === 'Overdue').length + ' members overdue', 'text-red-600'));
     }
+    const recent = checkins.slice(0, 8).map(c => { const m = members.find(x => x.id === c.memberId);
+      return `<tr class="row-hover border-b border-line last:border-0"><td class="py-2.5 pr-3 text-sub whitespace-nowrap">${fmtTime(c.at)}</td><td class="py-2.5 pr-3"><span class="flex items-center gap-2">${avatar(c.memberName, 24)}<span class="font-medium">${c.memberName}</span></span></td><td class="py-2.5 text-right">${pill(m ? statusOf(m) : 'Paid')}</td></tr>`; }).join('');
+    const overdue = members.filter(m => statusOf(m) === 'Overdue').sort((a, b) => daysOverdue(b) - daysOverdue(a)).slice(0, 8)
+      .map(m => `<tr class="row-hover cursor-pointer border-b border-line last:border-0" onclick="openMember('${m.id}')"><td class="py-2.5 pr-3"><span class="flex items-center gap-2">${avatar(m.name, 24)}<span class="font-medium">${m.name}</span></span></td><td class="py-2.5 pr-3 text-sub">${m.id}</td><td class="py-2.5 pr-3 text-right text-red-600 font-medium">${daysOverdue(m)} days</td><td class="py-2.5 text-right">${pkr(TIERS[m.type] * Math.min(6, Math.ceil(daysOverdue(m) / 30)))}</td></tr>`).join('');
+    let html = `<div class="grid gap-4 ${owner ? 'grid-cols-4' : 'grid-cols-2 max-w-2xl'}">${kpis.join('')}</div>`;
+    html += `<div class="mt-4 grid gap-4 ${owner ? 'grid-cols-2' : 'grid-cols-1'}">${card('Daily check-ins · last 30 days', '<div style="height:260px"><canvas id="chk-chart"></canvas></div>')}${owner ? card('Revenue vs expenses · last 6 months', '<div style="height:260px"><canvas id="rev-chart"></canvas></div>') : ''}</div>`;
+    html += `<div class="mt-4 grid gap-4 ${owner ? 'grid-cols-2' : 'grid-cols-1 max-w-3xl'}">${card('Recent check-ins', `<table class="w-full text-left dense"><tbody>${recent || ''}</tbody></table>` + (recent ? '' : emptyState('scan-line', 'No check-ins yet today')))}${owner ? card('Overdue members', overdue ? `<table class="w-full text-left dense"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-2 font-medium">Member</th><th class="pb-2 font-medium">ID</th><th class="pb-2 font-medium text-right">Overdue</th><th class="pb-2 font-medium text-right">Owed</th></tr></thead><tbody>${overdue}</tbody></table>` : emptyState('check-circle-2', 'No overdue members')) : ''}</div>`;
+    return html;
+  },
+  mount() {
+    const chk = dailyCheckinSeries(30);
+    chart('chk-chart', { type: 'line', data: { labels: chk.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: [{ label: 'Check-ins', data: chk.map(x => x.count), borderColor: '#185fa5', backgroundColor: 'rgba(24,95,165,.10)', fill: true, tension: .35, pointRadius: 0, borderWidth: 2 }] }, options: lineOpts() });
+    if (state.role === 'Owner') { const ms = monthlySeries(6);
+      chart('rev-chart', { type: 'bar', data: { labels: ms.map(x => x.label), datasets: [{ label: 'Revenue', data: ms.map(x => x.rev), backgroundColor: '#16a34a', borderRadius: 4 }, { label: 'Expenses', data: ms.map(x => x.exp), backgroundColor: '#d97706', borderRadius: 4 }] }, options: barOpts(true) }); }
+  }
+};
 
-    // ---------------------------------------------------------------------
-    // Dashboard
-    // ---------------------------------------------------------------------
-    function viewDashboard() {
-      var d = state.data;
-      var thisMonth = monthStr();
-      var today = todayStr();
+/* ---- Scan page removed in the cloud (no fingerprint reader). ---- */
 
-      var activeCount = d.members.filter(function (m) { return memberStatus(m, d.policy) === 'active'; }).length;
-      var collectedMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; })
-        .reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
-      var expMonth = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; })
-        .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
-      var checkinsToday = d.checkins.filter(function (c) { return (c.at || '').slice(0, 10) === today; }).length;
+/* ---- Members ---- */
+PAGES.members = {
+  render() {
+    return `
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <div class="relative"><i data-lucide="search" class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-sub"></i><input id="mem-search" value="${state.memberSearch}" oninput="onMemberSearch(this.value)" placeholder="Search name or ID" class="w-72 rounded-lg border border-line py-2 pl-9 pr-3 text-sm" /></div>
+          <select onchange="onMemberFilter(this.value)" class="rounded-lg border border-line px-3 py-2 text-sm">${['All','Overdue','Due soon','Paid','Not enrolled'].map(f => `<option ${state.memberFilter === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
+        </div>
+        <button onclick="openAddMember()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Add new member</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-230px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr>
+          <th class="px-4 py-3 font-medium">Member</th><th class="px-4 py-3 font-medium">ID</th><th class="px-4 py-3 font-medium">Phone</th><th class="px-4 py-3 font-medium">Type</th><th class="px-4 py-3 font-medium">Last payment</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium text-right">Actions</th>
+        </tr></thead><tbody id="mem-tbody">${membersRows()}</tbody></table><div id="mem-empty"></div>
+      </div></div>
+      <div id="mem-count" class="mt-2 text-[12px] text-sub">${filteredMembers().length} members</div>`;
+  },
+  mount() { renderMembersEmpty(); }
+};
+function filteredMembers() {
+  const q = state.memberSearch.trim().toLowerCase();
+  return members.filter(m => { if (state.memberFilter !== 'All' && statusOf(m) !== state.memberFilter) return false; if (q && !(m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))) return false; return true; });
+}
+function membersRows() {
+  return filteredMembers().map(m => `<tr class="row-hover cursor-pointer border-t border-line" onclick="openMember('${m.id}')">
+    <td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(m.name, 30)}<span class="font-medium">${m.name}</span></span></td>
+    <td class="px-4 py-2.5 text-sub">${m.id}</td><td class="px-4 py-2.5 text-sub">${m.phone}</td><td class="px-4 py-2.5">${m.type}</td>
+    <td class="px-4 py-2.5 text-sub">${m.lastPayment ? fmtDate(m.lastPayment) : '—'}</td><td class="px-4 py-2.5">${pill(statusOf(m))}</td>
+    <td class="px-4 py-2.5 text-right" onclick="event.stopPropagation()"><button onclick="openPaymentForm('${m.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">Record payment</button> <button onclick="openMember('${m.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">View</button></td></tr>`).join('');
+}
+function refreshMembersTable() { const tb = document.getElementById('mem-tbody'); if (!tb) return; tb.innerHTML = membersRows(); document.getElementById('mem-count').textContent = filteredMembers().length + ' members'; renderMembersEmpty(); if (window.lucide) lucide.createIcons(); }
+function renderMembersEmpty() { const e = document.getElementById('mem-empty'); if (!e) return; e.innerHTML = filteredMembers().length ? '' : emptyState('users', 'No members match this filter'); if (window.lucide) lucide.createIcons(); }
+function onMemberSearch(v) { state.memberSearch = v; refreshMembersTable(); }
+function onMemberFilter(v) { state.memberFilter = v; refreshMembersTable(); }
 
-      var wrap = el('<div class="space-y-4"></div>');
+/* ---- Payments ---- */
+PAGES.payments = {
+  render() {
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="date" value="${state.payFrom}" onchange="state.payFrom=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+          <span class="text-sub text-sm">to</span>
+          <input type="date" value="${state.payTo}" onchange="state.payTo=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+          <select onchange="state.payMethod=this.value;refreshPaymentsTable()" class="rounded-lg border border-line px-3 py-2 text-sm">${['All', ...METHODS].map(m => `<option ${state.payMethod === m ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <div class="relative"><i data-lucide="search" class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-sub"></i><input value="${state.paySearch}" oninput="state.paySearch=this.value;refreshPaymentsTable()" placeholder="Search member" class="w-56 rounded-lg border border-line py-2 pl-9 pr-3 text-sm" /></div>
+        </div>
+        <button onclick="openPaymentForm()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Record payment</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-230px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr>
+          <th class="px-4 py-3 font-medium">Date</th><th class="px-4 py-3 font-medium">Member</th><th class="px-4 py-3 font-medium text-right">Amount</th><th class="px-4 py-3 font-medium">Membership month</th><th class="px-4 py-3 font-medium">Method</th><th class="px-4 py-3 font-medium">Recorded by</th><th class="px-4 py-3 font-medium text-right">Receipt</th>
+        </tr></thead><tbody id="pay-tbody">${paymentsRows()}</tbody></table><div id="pay-empty"></div>
+      </div></div>
+      <div id="pay-count" class="mt-2 text-[12px] text-sub"></div>`;
+  },
+  mount() { refreshPaymentsTable(); }
+};
+function filteredPayments() {
+  const q = state.paySearch.trim().toLowerCase(); const from = state.payFrom ? new Date(state.payFrom) : null; const to = state.payTo ? new Date(state.payTo) : null;
+  return payments.filter(p => { if (state.payMethod !== 'All' && p.method !== state.payMethod) return false; if (q && !(p.memberName.toLowerCase().includes(q) || p.memberId.toLowerCase().includes(q))) return false; if (from && stripTime(p.date) < stripTime(from)) return false; if (to && stripTime(p.date) > stripTime(to)) return false; return true; });
+}
+function paymentsRows() {
+  return filteredPayments().map(p => `<tr class="row-hover border-t border-line"><td class="px-4 py-2.5 text-sub whitespace-nowrap">${fmtDate(p.date)}</td><td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(p.memberName, 28)}<span><span class="block font-medium">${p.memberName}</span><span class="block text-[11px] text-sub">${p.memberId}</span></span></span></td><td class="px-4 py-2.5 text-right font-medium">${pkr(p.amount)}</td><td class="px-4 py-2.5 text-sub">${p.month}</td><td class="px-4 py-2.5">${p.method}</td><td class="px-4 py-2.5 text-sub">${p.recordedBy}</td><td class="px-4 py-2.5 text-right"><button onclick="printReceipt('${p.id}')" class="rounded-md border border-line px-2.5 py-1 text-[12px] font-medium hover:bg-gray-50">Print receipt</button></td></tr>`).join('');
+}
+function refreshPaymentsTable() { const tb = document.getElementById('pay-tbody'); if (!tb) return; const rows = filteredPayments(); tb.innerHTML = paymentsRows(); document.getElementById('pay-count').textContent = rows.length + ' payments · ' + pkr(rows.reduce((t, p) => t + p.amount, 0)) + ' total'; document.getElementById('pay-empty').innerHTML = rows.length ? '' : emptyState('wallet', 'No payments match these filters'); if (window.lucide) lucide.createIcons(); }
 
-      // KPI grid
-      var grid = el('<div class="grid grid-cols-2 gap-3"></div>');
-      [
-        ['Total members', String(d.members.length), '#818cf8'],
-        ['Active members', String(activeCount), '#4ade80'],
-        ['Collected (month)', pkr(collectedMonth), '#34d399'],
-        ['Expenses (month)', pkr(expMonth), '#f87171'],
-        ["Check-ins today", String(checkinsToday), '#fbbf24']
-      ].forEach(function (k) {
-        grid.appendChild(el(
-          '<div class="card p-3.5">' +
-            '<div class="text-[11px] uppercase tracking-wide text-slate-400">' + esc(k[0]) + '</div>' +
-            '<div class="text-xl font-bold mt-1" style="color:' + k[2] + '">' + esc(k[1]) + '</div>' +
-          '</div>'
-        ));
-      });
-      wrap.appendChild(grid);
+/* ---- Expenses ---- */
+PAGES.expenses = {
+  render() {
+    const thisM = monthSum(expenses, 0), lastM = monthSum(expenses, 1), ytd = ytdSum(expenses);
+    return `
+      <div class="grid grid-cols-3 gap-4">${kpiCard('This month', pkr(thisM), fmtMonth(TODAY), 'text-sub')}${kpiCard('Last month', pkr(lastM), fmtMonth(new Date(TODAY.getFullYear(), TODAY.getMonth() - 1, 1)), 'text-sub')}${kpiCard('Year to date', pkr(ytd), TODAY.getFullYear() + '', 'text-sub')}</div>
+      <div class="mt-4 flex items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <select onchange="state.expCat=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm">${['All','Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other'].map(c => `<option ${state.expCat === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          <input type="date" value="${state.expFrom}" onchange="state.expFrom=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm" /><span class="text-sub text-sm">to</span><input type="date" value="${state.expTo}" onchange="state.expTo=this.value;refreshExpensesTable()" class="rounded-lg border border-line px-3 py-2 text-sm" />
+        </div>
+        <button onclick="openExpenseForm()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="plus" class="h-4 w-4"></i>Record expense</button>
+      </div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><div class="max-h-[calc(100vh-330px)] overflow-auto">
+        <table class="w-full text-left dense"><thead class="sticky bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr><th class="px-4 py-3 font-medium">Date</th><th class="px-4 py-3 font-medium">Category</th><th class="px-4 py-3 font-medium">Description</th><th class="px-4 py-3 font-medium text-right">Amount</th><th class="px-4 py-3 font-medium">Recorded by</th></tr></thead><tbody id="exp-tbody">${expensesRows()}</tbody></table><div id="exp-empty"></div>
+      </div></div>
+      <div id="exp-count" class="mt-2 text-[12px] text-sub"></div>`;
+  },
+  mount() { refreshExpensesTable(); }
+};
+function monthSum(arr, monthsAgo) { const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - monthsAgo, 1); const key = monthKey(base); return arr.filter(x => monthKey(x.date) === key).reduce((t, x) => t + x.amount, 0); }
+function ytdSum(arr) { return arr.filter(x => x.date.getFullYear() === TODAY.getFullYear()).reduce((t, x) => t + x.amount, 0); }
+function filteredExpenses() { const from = state.expFrom ? new Date(state.expFrom) : null; const to = state.expTo ? new Date(state.expTo) : null; return expenses.filter(e => { if (state.expCat !== 'All' && e.category !== state.expCat) return false; if (from && stripTime(e.date) < stripTime(from)) return false; if (to && stripTime(e.date) > stripTime(to)) return false; return true; }); }
+function expensesRows() { return filteredExpenses().map(e => `<tr class="row-hover border-t border-line"><td class="px-4 py-2.5 text-sub whitespace-nowrap">${fmtDate(e.date)}</td><td class="px-4 py-2.5">${catTag(e.category)}</td><td class="px-4 py-2.5">${e.description}</td><td class="px-4 py-2.5 text-right font-medium">${pkr(e.amount)}</td><td class="px-4 py-2.5 text-sub">${e.recordedBy}</td></tr>`).join(''); }
+function refreshExpensesTable() { const tb = document.getElementById('exp-tbody'); if (!tb) return; const rows = filteredExpenses(); tb.innerHTML = expensesRows(); document.getElementById('exp-count').textContent = rows.length + ' expenses · ' + pkr(rows.reduce((t, e) => t + e.amount, 0)) + ' total'; document.getElementById('exp-empty').innerHTML = rows.length ? '' : emptyState('receipt', 'No expenses logged for this filter'); if (window.lucide) lucide.createIcons(); }
 
-      // Revenue chart
-      var chartCard = el(
-        '<div class="card p-4">' +
-          '<div class="text-sm font-semibold text-white mb-3">Monthly revenue (PKR)</div>' +
-          '<div style="position:relative;height:200px"><canvas id="revChart"></canvas></div>' +
-        '</div>'
-      );
-      wrap.appendChild(chartCard);
+/* ---- Reports ---- */
+const REPORTS = [
+  { id: 'attendance', icon: 'calendar-check', title: 'Daily attendance', desc: 'Check-ins per day over the last 30 days.' },
+  { id: 'collection', icon: 'banknote', title: 'Daily collection', desc: 'PKR collected per day by payment method.' },
+  { id: 'mrev', icon: 'trending-up', title: 'Monthly revenue', desc: 'Revenue by month with members paid and averages.' },
+  { id: 'mexp', icon: 'trending-down', title: 'Monthly expenses', desc: 'Expense totals by category, last 12 months.' },
+  { id: 'pnl', icon: 'scale', title: 'Monthly P&L', desc: 'Revenue vs expenses and net profit per month.' },
+  { id: 'lapsed', icon: 'user-minus', title: 'Lapsed members', desc: 'Members overdue more than 30 days, grouped.' },
+  { id: 'retention', icon: 'repeat', title: 'Member retention', desc: 'Join cohorts retained at 1, 3, 6, 12 months.' },
+  { id: 'topvisits', icon: 'activity', title: 'Top members by visits', desc: 'Top 20 by check-ins in the last 90 days.' },
+  { id: 'topspend', icon: 'crown', title: 'Top members by spend', desc: 'Top 20 by PKR paid in the last 12 months.' },
+  { id: 'yearend', icon: 'file-text', title: 'Year-end summary', desc: 'Full-year financial overview vs last year.' }
+];
+PAGES.reports = {
+  render() { return `<div class="grid grid-cols-3 gap-4">${REPORTS.map(r => `<button onclick="openReport('${r.id}')" class="group rounded-xl border border-line bg-white p-5 text-left hover:border-accent hover:shadow-sm transition"><span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><i data-lucide="${r.icon}" class="h-5 w-5"></i></span><div class="mt-3 font-semibold">${r.title}</div><div class="mt-1 text-[12px] text-sub leading-relaxed">${r.desc}</div><div class="mt-3 text-[12px] font-medium text-accent opacity-0 group-hover:opacity-100 transition">Open report →</div></button>`).join('')}</div>`; },
+  mount() {}
+};
 
-      // Recent check-ins
-      var recent = d.checkins.slice(0, 8);
-      var ci = el('<div class="card p-4"><div class="text-sm font-semibold text-white mb-3">Recent check-ins</div></div>');
-      if (!recent.length) ci.appendChild(el('<div class="text-slate-500 text-sm">No check-ins yet.</div>'));
-      else {
-        var list = el('<div class="space-y-2"></div>');
-        recent.forEach(function (c) {
-          var when = c.at ? new Date(c.at) : null;
-          var label = when && !isNaN(when.getTime()) ? when.toLocaleString('en-PK', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-          list.appendChild(el(
-            '<div class="flex items-center justify-between text-sm">' +
-              '<div class="flex items-center gap-2 min-w-0"><span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>' +
-                '<span class="text-slate-200 truncate">' + esc(c.member_name || c.member_code || 'Member') + '</span></div>' +
-              '<span class="text-slate-500 text-xs shrink-0">' + esc(label) + '</span>' +
-            '</div>'
-          ));
-        });
-        ci.appendChild(list);
-      }
-      wrap.appendChild(ci);
+/* ---- Staff ---- */
+PAGES.staff = {
+  render() {
+    const rows = staff.map(s => `<tr class="row-hover cursor-pointer border-t border-line" onclick="openStaff('${s.id}')"><td class="px-4 py-2.5"><span class="flex items-center gap-2.5">${avatar(s.name, 30)}<span class="font-medium">${s.name}</span></span></td><td class="px-4 py-2.5">${s.role}</td><td class="px-4 py-2.5 text-sub">${s.phone}</td><td class="px-4 py-2.5 text-right">${s.salary ? pkr(s.salary) : '—'}</td><td class="px-4 py-2.5">${s.status === 'active' ? '<span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">Active</span>' : '<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">On leave</span>'}</td></tr>`).join('');
+    return `<div class="flex items-center justify-between"><div class="text-sm text-sub">${staff.length} staff · monthly payroll ${pkr(staff.reduce((t, s) => t + s.salary, 0))}</div></div>
+      <div class="mt-4 overflow-hidden rounded-xl border border-line bg-white"><table class="w-full text-left dense"><thead class="bg-gray-50 text-[11px] uppercase tracking-wide text-sub"><tr><th class="px-4 py-3 font-medium">Name</th><th class="px-4 py-3 font-medium">Role</th><th class="px-4 py-3 font-medium">Phone</th><th class="px-4 py-3 font-medium text-right">Monthly salary</th><th class="px-4 py-3 font-medium">Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  },
+  mount() {}
+};
 
-      // draw chart after attach
-      setTimeout(function () { drawRevenueChart(d); }, 0);
-      return wrap;
+/* ---- Settings ---- */
+PAGES.settings = {
+  render() {
+    return `<div class="grid grid-cols-2 gap-4 max-w-5xl">
+      ${card('Gym details', `<div class="space-y-3">${field('Gym name','set-name',GYM.name||'')}${field('Address','set-addr',GYM.address||'')}${field('City','set-city',GYM.city||'')}${field('Phone','set-phone',GYM.phone||'')}<div><div class="text-[12px] font-medium text-sub mb-1">Logo</div><div id="logo-area">${logoArea()}</div></div><button onclick="saveGymDetails()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save details</button></div>`)}
+      ${card('Membership tiers', `<div class="space-y-2">${TIER_NAMES.map(t => `<div class="flex items-center justify-between gap-3"><span class="text-sm font-medium w-24">${t}</span><div class="flex items-center gap-2 flex-1"><span class="text-sub text-sm">PKR</span><input id="tier-${t}" type="number" value="${TIERS[t]}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /><span class="text-sub text-sm whitespace-nowrap">/ month</span></div></div>`).join('')}<button onclick="saveTiers()" class="mt-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save tiers</button></div>`)}
+      ${card('Fee policy', `<div class="space-y-3"><div class="flex items-center justify-between gap-3"><span class="text-sm">Billing cycle (days)</span><input id="pol-cycle" type="number" value="${POLICY.cycleDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><div class="flex items-center justify-between gap-3"><span class="text-sm">"Due soon" warning (days before)</span><input id="pol-due" type="number" value="${POLICY.dueSoonDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><button onclick="savePolicy()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save policy</button></div>`)}
+      ${card('About', `<div class="space-y-1.5 text-sm"><div class="flex justify-between"><span class="text-sub">Software</span><span class="font-medium">${GYM.name || 'Demo Gym'} Manager</span></div><div class="flex justify-between"><span class="text-sub">Version</span><span class="font-medium">${VERSION}</span></div><div class="flex justify-between"><span class="text-sub">Mode</span><span class="font-medium">Cloud dashboard</span></div><div class="flex justify-between"><span class="text-sub">Support</span><span class="font-medium">${GYM.email || ''}</span></div></div>`)}
+    </div>`;
+  },
+  mount() {}
+};
+function field(label, id, val) { return `<div><div class="text-[12px] font-medium text-sub mb-1">${label}</div><input id="${id}" value="${val}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>`; }
+
+/* ============================ SLIDE-OVERS / MODAL / TOAST ============================ */
+let _slideTimer = null;
+function openSlide(title, body) {
+  if (_slideTimer) { clearTimeout(_slideTimer); _slideTimer = null; }
+  const panel = document.getElementById('slideover-panel');
+  panel.innerHTML = `<div class="flex items-center justify-between border-b border-line px-6 h-16 shrink-0"><h2 class="text-base font-semibold">${title}</h2><button onclick="closeSlide()" class="rounded-lg p-2 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><div class="flex-1 overflow-y-auto p-6">${body}</div>`;
+  document.getElementById('slideover').classList.remove('hidden');
+  requestAnimationFrame(() => panel.classList.remove('translate-x-full'));
+  if (window.lucide) lucide.createIcons();
+}
+function closeSlide() { const panel = document.getElementById('slideover-panel'); panel.classList.add('translate-x-full'); _slideTimer = setTimeout(() => document.getElementById('slideover').classList.add('hidden'), 280); }
+function openModal(html) { document.getElementById('modal-card').innerHTML = html; const m = document.getElementById('modal'); m.classList.remove('hidden'); m.classList.add('flex'); if (window.lucide) lucide.createIcons(); }
+function closeModal() { const m = document.getElementById('modal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+let _toastT; function toast(msg) { document.getElementById('toast-msg').textContent = msg; const t = document.getElementById('toast'); t.classList.remove('hidden'); clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.add('hidden'), 2600); }
+
+/* ---- member detail ---- */
+function openMember(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  const owner = state.role === 'Owner'; const s = statusOf(m), due = dueDateOf(m);
+  const hist = payments.filter(p => p.memberId === id).slice(0, 12);
+  const histRows = hist.length ? hist.map(p => `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtDate(p.date)}</td><td class="py-2 pr-3">${p.month}</td><td class="py-2 pr-3">${p.method}</td><td class="py-2 text-right font-medium">${pkr(p.amount)}</td></tr>`).join('') : `<tr><td colspan="4" class="py-4 text-center text-sub text-[13px]">No payments recorded yet</td></tr>`;
+  const body = `
+    <div class="flex items-center gap-4">${avatar(m.name, 64)}<div class="flex-1"><div class="text-[12px] text-sub">${m.id} · ${m.type} membership</div><div class="text-xl font-semibold">${m.name}</div><div class="mt-1">${pill(s)}</div></div></div>
+    <div class="mt-5 grid grid-cols-2 gap-3 text-sm">
+      ${infoCell('Phone', m.phone)}${infoCell('Joined', fmtDateLong(m.joinDate))}${infoCell('Last payment', m.lastPayment ? fmtDateLong(m.lastPayment) : '—')}${infoCell('Next due', due ? fmtDateLong(due) : '—')}
+      ${infoCell('Fingerprint', m.fingerprint ? ('Enrolled · ' + (m.fingerprintSamples || ENROLL_SAMPLES) + ' samples') : 'Not enrolled')}
+      ${owner ? infoCell('Total spend', pkr(memberSpend(id))) : infoCell('Visits (90d)', memberVisits(id, 90))}
+    </div>
+    <div class="mt-5 flex flex-wrap gap-2">
+      <button onclick="openPaymentForm('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button>
+      <button onclick="openEditMember('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Edit</button>
+      <button onclick="toggleSuspend('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${m.suspended ? 'Re-activate' : 'Suspend membership'}</button>
+    </div>
+    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Membership history</div><div class="rounded-lg border border-line p-3 text-sm"><div class="flex items-center gap-2"><i data-lucide="user-check" class="h-4 w-4 text-accent"></i> Enrolled as <span class="font-medium">${m.type}</span> on ${fmtDateLong(m.joinDate)}</div></div></div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 30 days</div>${heatmap(id)}</div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Payment history</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Date</th><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium">Method</th><th class="pb-1 font-medium text-right">Amount</th></tr></thead><tbody>${histRows}</tbody></table></div>`;
+  openSlide('Member detail', body);
+}
+function infoCell(label, val) { return `<div class="rounded-lg border border-line px-3 py-2"><div class="text-[11px] text-sub">${label}</div><div class="font-medium">${val}</div></div>`; }
+function heatmap(id) {
+  let cells = '';
+  for (let i = 29; i >= 0; i--) { const d = addDays(TODAY, -i); const n = checkins.filter(c => c.memberId === id && daysBetween(c.at, d) === 0).length; const bg = n === 0 ? '#eef2f6' : n === 1 ? '#9cc0e3' : '#185fa5'; cells += `<div title="${fmtDate(d)} · ${n} visit(s)" style="width:18px;height:18px;border-radius:4px;background:${bg}"></div>`; }
+  return `<div style="display:grid;grid-template-columns:repeat(15,18px);gap:5px">${cells}</div><div class="mt-2 flex items-center gap-2 text-[11px] text-sub">Less <span style="width:12px;height:12px;border-radius:3px;background:#eef2f6;display:inline-block"></span><span style="width:12px;height:12px;border-radius:3px;background:#9cc0e3;display:inline-block"></span><span style="width:12px;height:12px;border-radius:3px;background:#185fa5;display:inline-block"></span> More</div>`;
+}
+async function toggleSuspend(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  try { await cloudCmd(m.suspended ? 'reactivateMember' : 'suspendMember', { code: m.id }, (m.suspended ? 'Re-activation' : 'Suspension') + ' queued — applies on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+
+/* ---- staff detail ---- */
+function openStaff(id) {
+  const s = staff.find(x => x.id === id); if (!s) return;
+  // Real salary history: salary expenses recorded for this person, earliest first.
+  const salPays = expenses.filter(e => e.category === 'Salaries' && (e.description || '').includes(s.name)).slice().sort((a, b) => a.date - b.date);
+  const salRows = salPays.length ? salPays.map(e => `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtDate(e.date)}</td><td class="py-2 pr-3">${fmtMonth(e.date)}</td><td class="py-2 text-right font-medium">${pkr(e.amount)}</td><td class="py-2 pl-3 text-right text-green-600 text-[12px]">Paid</td></tr>`).join('') : `<tr><td colspan="4" class="py-4 text-center text-sub text-[13px]">No salary payments recorded yet</td></tr>`;
+  // Real attendance: staff fingerprint check-ins, last 14 days.
+  let att = ''; for (let i = 13; i >= 0; i--) { const d = addDays(TODAY, -i); const n = staffCheckins.filter(c => c.staffId === s.id && daysBetween(c.at, d) === 0).length; att += `<div title="${fmtDate(d)} · ${n} check-in(s)" style="width:20px;height:20px;border-radius:4px;background:${n ? '#16a34a' : '#eef2f6'}"></div>`; }
+  const totalAtt = staffCheckins.filter(c => c.staffId === s.id).length;
+  const body = `<div class="flex items-center gap-4">${avatar(s.name, 64)}<div><div class="text-xl font-semibold">${s.name}</div><div class="text-sm text-sub">${s.role} · ${s.phone || '—'}</div><div class="mt-1 text-sm">Monthly salary: <span class="font-medium">${s.salary ? pkr(s.salary) : '—'}</span> · ${s.status === 'on leave' ? '<span class="text-amber-700">On leave</span>' : '<span class="text-green-700">Active</span>'}</div></div></div>
+    <div class="mt-4 grid grid-cols-2 gap-3 text-sm">${infoCell('Joined', s.join ? fmtDateLong(dOnly(s.join)) : '—')}${infoCell('Fingerprint', s.fingerprint ? ('Enrolled · ' + (s.fingerprintSamples || ENROLL_SAMPLES) + ' samples') : 'Not enrolled')}</div>
+    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Salary payments</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Date</th><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium text-right">Amount</th><th class="pb-1 font-medium text-right">Status</th></tr></thead><tbody>${salRows}</tbody></table></div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 14 days ${totalAtt ? `<span class="text-sub font-normal">(${totalAtt} check-ins total)</span>` : ''}</div><div style="display:grid;grid-template-columns:repeat(14,20px);gap:5px">${att}</div>${totalAtt ? '' : '<div class="mt-2 text-[12px] text-sub">No check-ins recorded yet.</div>'}</div>`;
+  openSlide('Staff detail', body);
+}
+/* Staff is view-only in the cloud (the laptop agent does not apply staff writes). */
+
+/* ---- reports detail ---- */
+function openReport(id) { openSlide((REPORTS.find(x => x.id === id) || {}).title || 'Report', '<div id="report-body"></div>'); setTimeout(() => { reportBody(id); if (window.lucide) lucide.createIcons(); }, 60); }
+function reportBody(id) {
+  const el = document.getElementById('report-body'); if (!el) return;
+  if (id === 'attendance') { const s = dailyCheckinSeries(30); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Date','Check-ins'], s.map(x => [fmtDate(x.d), x.count]))}`; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: [{ label: 'Check-ins', data: s.map(x => x.count), backgroundColor: '#185fa5', borderRadius: 3 }] }, options: barOpts(false) }); }
+  else if (id === 'collection') { const s = dailyCollectionSeries(30); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Date', ...METHODS, 'Total'], s.map(x => [fmtDate(x.d), ...METHODS.map(m => pkr(x.byMethod[m])), pkr(x.total)]))}`; const colors = { Cash: '#185fa5', Card: '#0f766e', Easypaisa: '#16a34a', JazzCash: '#d97706' }; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.d.getDate() + '/' + (x.d.getMonth() + 1)), datasets: METHODS.map(m => ({ label: m, data: s.map(x => x.byMethod[m]), backgroundColor: colors[m] })) }, options: barOpts(true, true) }); }
+  else if (id === 'mrev') { const s = monthlySeries(12); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Revenue','Members paid','Avg payment'], s.map(x => [x.label, pkr(x.rev), x.paidCount, pkr(x.payCount ? x.rev / x.payCount : 0)]))}`; chart('r-canvas', { type: 'bar', data: { labels: s.map(x => x.label), datasets: [{ label: 'Revenue', data: s.map(x => x.rev), backgroundColor: '#16a34a', borderRadius: 3 }] }, options: barOpts(false) }); }
+  else if (id === 'mexp') { const cats = ['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other']; const colors = ['#4f46e5','#2563eb','#0891b2','#7c3aed','#0d9488','#d97706','#ea580c','#6b7280']; const ms = []; for (let i = 11; i >= 0; i--) ms.push(new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1)); const data = cats.map((c, ci) => ({ label: c, backgroundColor: colors[ci], data: ms.map(b => expenses.filter(e => monthKey(e.date) === monthKey(b) && e.category === c).reduce((t, e) => t + e.amount, 0)) })); el.innerHTML = `<div style="height:260px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Total'], ms.map(b => [MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2), pkr(expenses.filter(e => monthKey(e.date) === monthKey(b)).reduce((t, e) => t + e.amount, 0))]))}`; chart('r-canvas', { type: 'bar', data: { labels: ms.map(b => MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2)), datasets: data }, options: barOpts(true, true) }); }
+  else if (id === 'pnl') { const s = monthlySeries(12); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Revenue','Expenses','Net profit'], s.map(x => [x.label, pkr(x.rev), pkr(x.exp), netCell(x.rev - x.exp)]))}`; chart('r-canvas', { type: 'line', data: { labels: s.map(x => x.label), datasets: [{ label: 'Revenue', data: s.map(x => x.rev), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }, { label: 'Expenses', data: s.map(x => x.exp), borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }] }, options: lineOpts(true) }); }
+  else if (id === 'lapsed') { const lapsed = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 30); const buckets = { '31–60 days': [], '61–90 days': [], 'Over 90 days': [] }; lapsed.forEach(m => { const d = daysOverdue(m); if (d <= 60) buckets['31–60 days'].push(m); else if (d <= 90) buckets['61–90 days'].push(m); else buckets['Over 90 days'].push(m); }); el.innerHTML = Object.keys(buckets).map(k => `<div class="mb-4"><div class="mb-2 flex items-center gap-2 text-sm font-semibold">${k} <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-sub">${buckets[k].length}</span></div>${buckets[k].length ? `<table class="w-full text-left text-[13px]"><tbody>${buckets[k].map(m => `<tr class="border-t border-line cursor-pointer row-hover" onclick="closeSlide();openMember('${m.id}')"><td class="py-2"><span class="flex items-center gap-2">${avatar(m.name, 24)}${m.name}</span></td><td class="py-2 text-sub">${m.id}</td><td class="py-2 text-right text-red-600">${daysOverdue(m)} days</td><td class="py-2 text-right">${pkr(TIERS[m.type])}</td></tr>`).join('')}</tbody></table>` : '<div class="text-[13px] text-sub">None</div>'}</div>`).join(''); }
+  else if (id === 'retention') {
+    const rows = [];
+    for (let i = 17; i >= 0; i--) {   // earliest cohort first; only months that had sign-ups
+      const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1);
+      const cohort = members.filter(m => monthKey(m.joinDate) === monthKey(base));
+      if (!cohort.length) continue;
+      const ret = (n) => i < n ? '—' : cohort.filter(m => paidOnOrAfter(m.id, addMonths(m.joinDate, n))).length;
+      rows.push([fmtMonth(base), cohort.length, ret(1), ret(3), ret(6), ret(12)]);
     }
+    el.innerHTML = `<p class="mb-3 text-[13px] text-sub">Members who joined each month and how many were still paying after N months. Computed from real join dates and payments; "—" means that many months haven't passed yet.</p>${rows.length ? reportTable(['Cohort','Joined','1 mo','3 mo','6 mo','12 mo'], rows) : emptyState('repeat', 'No member sign-ups yet')}`;
+  }
+  else if (id === 'topvisits') { const rows = members.map(m => ({ m, v: memberVisits(m.id, 90) })).sort((a, b) => b.v - a.v).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Visits (90d)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, x.v])); }
+  else if (id === 'topspend') { const rows = members.map(m => ({ m, s: memberSpend(m.id) })).sort((a, b) => b.s - a.s).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Total paid (12mo)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, pkr(x.s)])); }
+  else if (id === 'yearend') { const s12 = monthlySeries(12); const rev = s12.reduce((t, x) => t + x.rev, 0), exp = s12.reduce((t, x) => t + x.exp, 0), net = rev - exp; const newJoin = members.filter(m => daysBetween(m.joinDate, TODAY) <= 365).length; const lost = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 60).length; const prevRev = Math.round(rev * 0.86), prevExp = Math.round(exp * 0.91), prevNet = prevRev - prevExp; el.innerHTML = `<div class="grid grid-cols-2 gap-3">${yeKpi('Total revenue', pkr(rev), 'vs ' + pkr(prevRev) + ' last year', net >= 0)}${yeKpi('Total expenses', pkr(exp), 'vs ' + pkr(prevExp) + ' last year', false)}${yeKpi('Net profit', pkr(net), ((net - prevNet) >= 0 ? '+' : '') + pkr(net - prevNet) + ' vs last year', (net - prevNet) >= 0)}${yeKpi('Avg monthly revenue', pkr(rev / 12), '12-month average', true)}${yeKpi('New members', newJoin, 'joined this year', true)}${yeKpi('Members lost', lost, 'lapsed >60 days', false)}</div><div class="mt-4">${reportTable(['Metric','This year','Last year'], [['Revenue', pkr(rev), pkr(prevRev)], ['Expenses', pkr(exp), pkr(prevExp)], ['Net profit', pkr(net), pkr(prevNet)], ['Profit margin', Math.round(net / rev * 100) + '%', Math.round(prevNet / prevRev * 100) + '%']])}</div>`; }
+}
+function reportTable(headers, rows) { return `<table class="mt-4 w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub border-b border-line">${headers.map((h, i) => `<th class="py-2 font-medium ${i >= 2 ? 'text-right' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line last:border-0">${r.map((c, i) => `<td class="py-2 ${i >= 2 ? 'text-right' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`; }
+function netCell(v) { return `<span class="${v >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">${pkr(v)}</span>`; }
+function yeKpi(label, val, sub, good) { return `<div class="rounded-xl border border-line p-4"><div class="text-[12px] text-sub">${label}</div><div class="mt-1 text-xl font-semibold">${val}</div><div class="mt-1 text-[12px] ${good ? 'text-green-600' : 'text-sub'}">${sub}</div></div>`; }
 
-    function monthlyRevenue(d) {
-      var map = {};
-      d.payments.forEach(function (p) {
-        var m = p.month || (p.date || '').slice(0, 7);
-        if (!m) return;
-        map[m] = (map[m] || 0) + (Number(p.amount) || 0);
-      });
-      var months = Object.keys(map).sort();
-      // keep the last 6 for a phone-sized chart
-      if (months.length > 6) months = months.slice(months.length - 6);
-      return { labels: months, values: months.map(function (m) { return map[m]; }) };
-    }
+/* ============================ FORMS & ACTIONS (API-backed) ============================ */
+function upsertMember(m) { const i = members.findIndex(x => x.id === m.id); if (i >= 0) members[i] = m; else members.unshift(m); }
+function memberOptions(selId) { return members.map(m => `<option value="${m.id}" ${selId === m.id ? 'selected' : ''}>${m.name} · ${m.id}</option>`).join(''); }
 
-    function drawRevenueChart(d) {
-      var canvas = $('#revChart');
-      if (!canvas || typeof Chart === 'undefined') return;
-      var r = monthlyRevenue(d);
-      if (chart) { chart.destroy(); chart = null; }
-      chart = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: r.labels.length ? r.labels : ['—'],
-          datasets: [{
-            data: r.values.length ? r.values : [0],
-            backgroundColor: '#6366f1',
-            borderRadius: 6,
-            maxBarThickness: 46
-          }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: { callbacks: { label: function (c) { return pkr(c.parsed.y); } } }
-          },
-          scales: {
-            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
-            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: function (v) { return v >= 1000 ? (v / 1000) + 'k' : v; } } }
-          }
-        }
-      });
-    }
+function openPaymentForm(memberId) {
+  const m = memberId ? members.find(x => x.id === memberId) : null;
+  openSlide('Record payment', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Find member</div>
+      <input id="pf-search" oninput="pfFilter(this.value)" placeholder="Search by name or ID" class="w-full rounded-lg border border-line px-3 py-2 text-sm" />
+    </div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Member</div><select id="pf-member" size="6" onchange="pfSyncAmount()" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${memberOptions(memberId)}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="pf-amount" type="number" value="${m ? TIERS[m.type] : (TIERS.Basic || 0)}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Method</div><select id="pf-method" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${METHODS.map(x => `<option>${x}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Notes (optional)</div><input id="pf-notes" placeholder="e.g. Monthly subscription" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitPayment()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+function pfFilter(q) {
+  q = (q || '').trim().toLowerCase();
+  const sel = document.getElementById('pf-member'); if (!sel) return;
+  const cur = sel.value;
+  const filtered = members.filter(mm => !q || mm.name.toLowerCase().includes(q) || mm.id.toLowerCase().includes(q));
+  sel.innerHTML = filtered.map(mm => `<option value="${mm.id}" ${cur === mm.id ? 'selected' : ''}>${mm.name} · ${mm.id}</option>`).join('');
+  if (filtered.length === 1) { sel.value = filtered[0].id; pfSyncAmount(); }
+}
+function pfSyncAmount() { const id = document.getElementById('pf-member').value; const m = members.find(x => x.id === id); if (m) document.getElementById('pf-amount').value = TIERS[m.type]; }
+async function recordPaymentFor(m, amount, method, notes) {
+  await cloudCmd('recordPayment', { memberCode: m.id, amount: Number(amount), method, notes }, 'Payment for ' + m.name + ' queued — applies on the gym laptop shortly');
+}
+async function submitPayment() {
+  const id = document.getElementById('pf-member').value; const amt = document.getElementById('pf-amount').value; const method = document.getElementById('pf-method').value; const notes = document.getElementById('pf-notes').value;
+  const m = members.find(x => x.id === id); if (!m) return;
+  try { await recordPaymentFor(m, amt, method, notes); } catch (e) { toast(e.message); }
+}
+function openExpenseForm() {
+  const paidThisMonth = (s) => expenses.some(e => e.category === 'Salaries' && monthKey(e.date) === monthKey(TODAY) && (e.description || '').includes(s.name));
+  const rows = staff.filter(s => s.salary > 0).map(s => {
+    const paid = paidThisMonth(s);
+    return `<div class="flex items-center justify-between rounded-lg border border-line px-3 py-2.5">
+      <span class="flex items-center gap-2.5">${avatar(s.name, 30)}<span><span class="block font-medium text-sm">${s.name}</span><span class="block text-[11px] text-sub">${s.role} · ${pkr(s.salary)}/mo</span></span></span>
+      ${paid ? '<span class="inline-flex items-center gap-1 rounded-md bg-green-100 px-2.5 py-1 text-[12px] font-semibold text-green-800"><i data-lucide="check" class="h-3.5 w-3.5"></i>Paid this month</span>' : `<button onclick="payStaffSalary('${s.id}')" class="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover">Pay salary</button>`}
+    </div>`;
+  }).join('');
+  openSlide('Record expense', `<div class="space-y-4">
+    <div class="text-[12px] font-medium text-sub">Staff salaries · ${fmtMonth(TODAY)}</div>
+    <div class="space-y-2">${rows || emptyState('users', 'No staff added yet — add them in the Staff tab')}</div>
+    <div class="border-t border-line pt-3"><button onclick="openExpenseManual()" class="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50"><i data-lucide="plus" class="h-4 w-4"></i>Record a different expense manually</button></div>
+  </div>`);
+}
+async function payStaffSalary(staffId) {
+  const s = staff.find(x => x.id === staffId); if (!s) return;
+  try {
+    await cloudCmd('addExpense', { category: 'Salaries', amount: s.salary, description: 'Salary — ' + s.name + ' (' + s.role + ')', date: fmtDate(TODAY) }, "Salary for " + s.name + ' queued — applies on the gym laptop shortly');
+  } catch (err) { toast(err.message); }
+}
+function openExpenseManual() {
+  openSlide('Record expense', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Category</div><select id="ef-cat" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other'].map(c => `<option>${c}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="ef-amount" type="number" value="10000" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Description</div><input id="ef-desc" placeholder="e.g. Treadmill belt service" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Date</div><input id="ef-date" type="date" value="${fmtDate(TODAY)}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitExpense()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record expense</button><button onclick="openExpenseForm()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Back</button></div>
+  </div>`);
+}
+async function submitExpense() {
+  const cat = document.getElementById('ef-cat').value, amt = Number(document.getElementById('ef-amount').value), desc = document.getElementById('ef-desc').value, date = document.getElementById('ef-date').value;
+  try { await cloudCmd('addExpense', { category: cat, amount: amt, description: desc, date }, 'Expense queued — applies on the gym laptop shortly'); } catch (err) { toast(err.message); }
+}
+function openAddMember() {
+  openSlide('Register new member', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Full name</div><input id="am-name" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="e.g. Ahsan Raza" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="am-phone" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="+92 3xx xxxxxxx" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Membership type</div><select id="am-type" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${TIER_NAMES.map(t => `<option>${t}</option>`).join('')}</select></div>
+    <div class="rounded-lg border border-line bg-panel p-3 text-[12px] text-sub leading-relaxed">Fingerprint enrollment happens on the gym laptop after the member is created.</div>
+    <div class="flex gap-2 pt-2"><button onclick="submitMember()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add member</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitMember() {
+  const name = (document.getElementById('am-name').value || '').trim(); if (!name) { toast('Enter a member name'); return; }
+  const phone = document.getElementById('am-phone').value, type = document.getElementById('am-type').value;
+  try { await cloudCmd('addMember', { name, phone, type }, name + ' queued — will be created on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+function openEditMember(id) {
+  const m = members.find(x => x.id === id); if (!m) return;
+  openSlide('Edit member', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Full name</div><input id="em-name" value="${m.name}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="em-phone" value="${m.phone}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Membership type</div><select id="em-type" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${TIER_NAMES.map(t => `<option ${m.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitEditMember('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save changes</button><button onclick="openMember('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitEditMember(id) {
+  const name = document.getElementById('em-name').value, phone = document.getElementById('em-phone').value, type = document.getElementById('em-type').value;
+  try { await cloudCmd('editMember', { code: id, name, phone, type }, 'Member changes queued — apply on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+/* Add staff / Add user removed in the cloud (laptop-only writes). */
 
-    // ---------------------------------------------------------------------
-    // Members
-    // ---------------------------------------------------------------------
-    function viewMembers() {
-      var d = state.data;
-      var wrap = el('<div class="space-y-3"></div>');
+/* settings actions */
+async function saveGymDetails() {
+  try { await cloudCmd('updateSettings', { gym: { name: document.getElementById('set-name').value, address: document.getElementById('set-addr').value, city: document.getElementById('set-city').value, phone: document.getElementById('set-phone').value } }, 'Gym details queued — apply on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+function logoArea() {
+  if (LOGO) return `<div class="flex items-center gap-3"><img src="${LOGO}" class="h-16 w-16 rounded-lg border border-line object-cover" /><span class="text-[12px] text-sub">Set on the gym laptop</span></div>`;
+  return `<div class="flex h-20 w-full items-center justify-center rounded-lg border border-dashed border-line text-[12px] text-sub">No logo · set it on the gym laptop</div>`;
+}
+async function saveTiers() {
+  const tiers = {}; TIER_NAMES.forEach(t => { tiers[t] = Number(document.getElementById('tier-' + t).value); });
+  try { await cloudCmd('updateSettings', { tiers }, 'Membership tiers queued — apply on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+async function savePolicy() {
+  try { await cloudCmd('updateSettings', { policy: { cycleDays: Number(document.getElementById('pol-cycle').value), dueSoonDays: Number(document.getElementById('pol-due').value) } }, 'Fee policy queued — apply on the gym laptop shortly'); } catch (e) { toast(e.message); }
+}
+/* Backup / restore / CSV export and fingerprint enrollment are laptop-only and removed in the cloud. */
 
-      // Search + filter
-      var controls = el(
-        '<div class="space-y-2">' +
-          '<input id="mSearch" placeholder="Search name, code or phone…" value="' + esc(state.memberSearch) + '" />' +
-          '<div class="flex gap-2 text-xs" id="mFilters"></div>' +
-        '</div>'
-      );
-      var filters = [['all', 'All'], ['active', 'Active'], ['due', 'Due'], ['suspended', 'Suspended']];
-      var fbox = controls.querySelector('#mFilters');
-      filters.forEach(function (f) {
-        var on = state.memberFilter === f[0];
-        var b = el('<button class="px-3 py-1.5 rounded-lg font-medium ' + (on ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300') + '">' + f[1] + '</button>');
-        b.addEventListener('click', function () { state.memberFilter = f[0]; render(); });
-        fbox.appendChild(b);
-      });
-      var search = controls.querySelector('#mSearch');
-      search.addEventListener('input', function () {
-        state.memberSearch = search.value;
-        var list = $('#mList'); if (list) renderMemberList(list);
-      });
-      wrap.appendChild(controls);
+/* ---- receipt ---- */
+function printReceipt(payId) {
+  const p = payments.find(x => x.id === payId); if (!p) return;
+  const receipt = `<div style="width:300px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Inter,system-ui,sans-serif">
+    <div style="background:#185fa5;color:#fff;padding:16px 18px"><div style="font-size:16px;font-weight:700">${GYM.name}</div><div style="font-size:11px;opacity:.9">${GYM.address}, ${GYM.city}</div><div style="font-size:11px;opacity:.9">${GYM.phone}</div></div>
+    <div style="padding:18px"><div style="text-align:center;font-size:12px;letter-spacing:.08em;color:#6b7280;text-transform:uppercase;margin-bottom:12px">Payment receipt</div>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><td style="color:#6b7280;padding:4px 0">Receipt no.</td><td style="text-align:right;font-weight:600">${p.id}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Date</td><td style="text-align:right">${fmtDateLong(p.date)}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Member</td><td style="text-align:right">${p.memberName} (${p.memberId})</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Membership month</td><td style="text-align:right">${p.month}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Method</td><td style="text-align:right">${p.method}</td></tr>
+        <tr><td style="color:#6b7280;padding:4px 0">Received by</td><td style="text-align:right">${p.recordedBy}</td></tr>
+      </table>
+      <div style="border-top:1px dashed #d1d5db;margin:12px 0"></div>
+      <table style="width:100%;font-size:15px"><tr><td style="font-weight:700">Total paid</td><td style="text-align:right;font-weight:700;color:#185fa5">${pkr(p.amount)}</td></tr></table>
+      <div style="margin-top:28px;border-top:1px solid #111;width:140px;padding-top:4px;font-size:11px;color:#6b7280">Authorised signature</div>
+      <div style="margin-top:14px;text-align:center;font-size:11px;color:#9ca3af">Thank you for training with ${GYM.name}</div>
+    </div></div>`;
+  openModal(`<div class="rounded-xl bg-white p-4 shadow-2xl">${receipt}<div class="no-print mt-4 flex justify-end gap-2"><button onclick="closeModal()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Close</button><button onclick="doPrint()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Print</button></div></div>`);
+  document.getElementById('print-area').innerHTML = `<div style="display:flex;justify-content:center;padding-top:40px">${receipt}</div>`;
+}
+function doPrint() { window.print(); }
 
-      var listBox = el('<div id="mList" class="space-y-2"></div>');
-      wrap.appendChild(listBox);
-      renderMemberList(listBox);
-      return wrap;
-    }
+/* ---- charts ---- */
+const _charts = {};
+function chart(id, cfg) { const el = document.getElementById(id); if (!el) return; if (_charts[id]) _charts[id].destroy(); _charts[id] = new Chart(el.getContext('2d'), cfg); }
+function baseScales(stacked) { return { x: { stacked: !!stacked, grid: { display: false }, ticks: { color: '#6b7280', font: { size: 11 }, maxRotation: 0, autoSkip: true } }, y: { stacked: !!stacked, beginAtZero: true, grid: { color: '#f0f1f3' }, ticks: { color: '#6b7280', font: { size: 11 }, callback: v => v >= 1000 ? (v / 1000) + 'k' : v } } }; }
+function legendTop(show) { return { display: !!show, position: 'top', align: 'end', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, font: { size: 11 }, color: '#374151' } }; }
+function tip() { return { backgroundColor: '#111827', padding: 10, cornerRadius: 8, titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: c => { const v = c.parsed.y; return c.dataset.label + ': ' + (v >= 1000 ? pkr(v) : v); } } }; }
+function lineOpts(legend) { return { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: legendTop(legend), tooltip: tip() }, scales: baseScales(false) }; }
+function barOpts(legend, stacked) { return { responsive: true, maintainAspectRatio: false, plugins: { legend: legendTop(legend), tooltip: tip() }, scales: baseScales(stacked) }; }
 
-    function renderMemberList(container) {
-      var d = state.data;
-      var q = state.memberSearch.trim().toLowerCase();
-      var rows = d.members.filter(function (m) {
-        var st = memberStatus(m, d.policy);
-        if (state.memberFilter !== 'all' && state.memberFilter !== st) return false;
-        if (!q) return true;
-        return (m.name || '').toLowerCase().indexOf(q) >= 0 ||
-               (m.code || '').toLowerCase().indexOf(q) >= 0 ||
-               (m.phone || '').toLowerCase().indexOf(q) >= 0;
-      });
-      container.innerHTML = '';
-      if (!rows.length) { container.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No members match.</div>')); return; }
+/* ---- login gate ---- */
+function showLogin() {
+  const l = document.getElementById('login'); if (l) { l.classList.remove('hidden'); l.classList.add('flex'); }
+  if (window.lucide) lucide.createIcons();
+}
+function hideLogin() { const l = document.getElementById('login'); if (l) { l.classList.add('hidden'); l.classList.remove('flex'); } }
+async function doLogin(ev) {
+  if (ev) ev.preventDefault();
+  const username = (document.getElementById('login-user').value || '').trim();
+  const password = document.getElementById('login-pass').value || '';
+  const errEl = document.getElementById('login-error'); const btn = document.getElementById('login-btn');
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  if (!username || !password) { if (errEl) { errEl.textContent = 'Enter your username and password.'; errEl.classList.remove('hidden'); } return false; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  try {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Sign-in failed');
+    setToken(data.token); setAccount(data.account || null);
+    hideLogin();
+    await loadBootstrap(); render();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message || 'Sign-in failed'; errEl.classList.remove('hidden'); }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+  return false;
+}
+function logout() { setToken(null); setAccount(null); state.userMenuOpen = false; document.getElementById('app').innerHTML = ''; showLogin(); }
 
-      rows.forEach(function (m) {
-        var st = memberStatus(m, d.policy);
-        var card = el(
-          '<div class="card p-3.5">' +
-            '<div class="flex items-start justify-between gap-2">' +
-              '<div class="min-w-0">' +
-                '<div class="font-semibold text-white truncate">' + esc(m.name) + '</div>' +
-                '<div class="text-xs text-slate-400 mt-0.5">' + esc(m.code) + (m.phone ? ' · ' + esc(m.phone) : '') + ' · ' + esc(m.type || 'Basic') + '</div>' +
-                '<div class="text-xs text-slate-500 mt-0.5">Last payment: ' + esc(m.last_payment || '—') + '</div>' +
-              '</div>' +
-              '<div>' + statusBadge(st) + '</div>' +
-            '</div>' +
-          '</div>'
-        );
-
-        if (isOwner()) {
-          var actions = el('<div class="flex gap-2 mt-3"></div>');
-          var payBtn = el('<button class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 rounded-lg">Record payment</button>');
-          payBtn.addEventListener('click', function () { openPaymentModal(m); });
-          actions.appendChild(payBtn);
-
-          if (Number(m.suspended) === 1) {
-            var reBtn = el('<button class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-lg">Reactivate</button>');
-            reBtn.addEventListener('click', function () { sendCommand('reactivateMember', { code: m.code }); });
-            actions.appendChild(reBtn);
-          } else {
-            var suBtn = el('<button class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-semibold py-2 rounded-lg">Suspend</button>');
-            suBtn.addEventListener('click', function () { sendCommand('suspendMember', { code: m.code }); });
-            actions.appendChild(suBtn);
-          }
-          card.appendChild(actions);
-        }
-        container.appendChild(card);
-      });
-    }
-
-    // Modal: record payment
-    function openPaymentModal(m) {
-      var defaultAmount = (state.data.settings.tiers && state.data.settings.tiers[m.type]) || '';
-      var overlay = el(
-        '<div class="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-4">' +
-          '<div class="card w-full max-w-sm p-5 space-y-4">' +
-            '<div class="flex items-center justify-between"><h3 class="font-bold text-white">Record payment</h3>' +
-              '<button id="mx" class="text-slate-400 text-xl leading-none">&times;</button></div>' +
-            '<div class="text-sm text-slate-400">' + esc(m.name) + ' · ' + esc(m.code) + '</div>' +
-            '<div><label class="block text-xs text-slate-400 mb-1">Amount (PKR)</label>' +
-              '<input id="payAmt" type="number" inputmode="numeric" min="0" value="' + esc(defaultAmount) + '" /></div>' +
-            '<div><label class="block text-xs text-slate-400 mb-1">Method</label>' +
-              '<select id="payMethod"><option>Cash</option><option>Card</option><option>Bank Transfer</option><option>JazzCash</option><option>Easypaisa</option></select></div>' +
-            '<div class="flex gap-2 pt-1">' +
-              '<button id="payCancel" class="flex-1 bg-slate-700 text-slate-100 font-semibold py-2.5 rounded-xl">Cancel</button>' +
-              '<button id="paySave" class="flex-1 bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Queue payment</button>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      );
-      function close() { overlay.remove(); }
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
-      overlay.querySelector('#mx').addEventListener('click', close);
-      overlay.querySelector('#payCancel').addEventListener('click', close);
-      overlay.querySelector('#paySave').addEventListener('click', function () {
-        var amt = Math.round(Number(overlay.querySelector('#payAmt').value) || 0);
-        if (amt <= 0) { toast('Enter a valid amount.', 'error'); return; }
-        var method = overlay.querySelector('#payMethod').value;
-        close();
-        sendCommand('recordPayment', { memberCode: m.code, amount: amt, method: method });
-      });
-      document.body.appendChild(overlay);
-      setTimeout(function () { var a = overlay.querySelector('#payAmt'); if (a) a.focus(); }, 50);
-    }
-
-    // ---------------------------------------------------------------------
-    // Payments
-    // ---------------------------------------------------------------------
-    function viewPayments() {
-      var d = state.data;
-      var today = todayStr();
-      var thisMonth = monthStr();
-      var collectedToday = d.payments.filter(function (p) { return (p.date || '') === today; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
-      var collectedMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
-
-      var wrap = el('<div class="space-y-3"></div>');
-      var totals = el('<div class="grid grid-cols-2 gap-3"></div>');
-      totals.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Collected today</div><div class="text-lg font-bold mt-1 text-emerald-400">' + esc(pkr(collectedToday)) + '</div></div>'));
-      totals.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Collected this month</div><div class="text-lg font-bold mt-1 text-emerald-400">' + esc(pkr(collectedMonth)) + '</div></div>'));
-      wrap.appendChild(totals);
-
-      var listBox = el('<div class="space-y-2"></div>');
-      var rows = d.payments.slice(0, 200);
-      if (!rows.length) listBox.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No payments recorded.</div>'));
-      rows.forEach(function (p) {
-        listBox.appendChild(el(
-          '<div class="card p-3.5 flex items-center justify-between gap-3">' +
-            '<div class="min-w-0">' +
-              '<div class="font-medium text-white truncate">' + esc(p.member_name || p.member_code || '—') + '</div>' +
-              '<div class="text-xs text-slate-400 mt-0.5">' + esc(p.date || '') + (p.method ? ' · ' + esc(p.method) : '') + (p.month ? ' · ' + esc(p.month) : '') + '</div>' +
-            '</div>' +
-            '<div class="text-emerald-400 font-semibold shrink-0">' + esc(pkr(p.amount)) + '</div>' +
-          '</div>'
-        ));
-      });
-      wrap.appendChild(listBox);
-      return wrap;
-    }
-
-    // ---------------------------------------------------------------------
-    // Expenses
-    // ---------------------------------------------------------------------
-    function viewExpenses() {
-      var d = state.data;
-      var thisMonth = monthStr();
-      var expMonth = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
-      var wrap = el('<div class="space-y-3"></div>');
-
-      wrap.appendChild(el('<div class="card p-3.5"><div class="text-[11px] uppercase tracking-wide text-slate-400">Expenses this month</div><div class="text-lg font-bold mt-1 text-red-400">' + esc(pkr(expMonth)) + '</div></div>'));
-
-      if (isOwner()) {
-        var formCard = el(
-          '<form id="expForm" class="card p-4 space-y-3">' +
-            '<div class="text-sm font-semibold text-white">Add expense</div>' +
-            '<div class="grid grid-cols-2 gap-2">' +
-              '<div><label class="block text-xs text-slate-400 mb-1">Category</label>' +
-                '<select id="eCat"><option>Rent</option><option>Utilities</option><option>Salaries</option><option>Equipment</option><option>Maintenance</option><option>Supplies</option><option>Marketing</option><option>Other</option></select></div>' +
-              '<div><label class="block text-xs text-slate-400 mb-1">Amount (PKR)</label>' +
-                '<input id="eAmt" type="number" inputmode="numeric" min="0" required /></div>' +
-            '</div>' +
-            '<div><label class="block text-xs text-slate-400 mb-1">Date</label>' +
-              '<input id="eDate" type="date" value="' + esc(todayStr()) + '" /></div>' +
-            '<div><label class="block text-xs text-slate-400 mb-1">Description</label>' +
-              '<input id="eDesc" placeholder="Optional note" /></div>' +
-            '<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl">Queue expense</button>' +
-          '</form>'
-        );
-        formCard.addEventListener('submit', function (ev) {
-          ev.preventDefault();
-          var amt = Math.round(Number(formCard.querySelector('#eAmt').value) || 0);
-          if (amt <= 0) { toast('Enter a valid amount.', 'error'); return; }
-          sendCommand('addExpense', {
-            category: formCard.querySelector('#eCat').value,
-            amount: amt,
-            description: formCard.querySelector('#eDesc').value.trim(),
-            date: formCard.querySelector('#eDate').value || todayStr()
-          });
-          formCard.reset();
-          formCard.querySelector('#eDate').value = todayStr();
-        });
-        wrap.appendChild(formCard);
-      }
-
-      var listBox = el('<div class="space-y-2"></div>');
-      var rows = d.expenses.slice(0, 200);
-      if (!rows.length) listBox.appendChild(el('<div class="card p-6 text-center text-slate-500 text-sm">No expenses recorded.</div>'));
-      rows.forEach(function (e) {
-        listBox.appendChild(el(
-          '<div class="card p-3.5 flex items-center justify-between gap-3">' +
-            '<div class="min-w-0">' +
-              '<div class="font-medium text-white truncate">' + esc(e.category || 'Other') + '</div>' +
-              '<div class="text-xs text-slate-400 mt-0.5">' + esc(e.date || '') + (e.description ? ' · ' + esc(e.description) : '') + '</div>' +
-            '</div>' +
-            '<div class="text-red-400 font-semibold shrink-0">' + esc(pkr(e.amount)) + '</div>' +
-          '</div>'
-        ));
-      });
-      wrap.appendChild(listBox);
-      return wrap;
-    }
-
-    // ---------------------------------------------------------------------
-    // Reports
-    // ---------------------------------------------------------------------
-    function viewReports() {
-      var d = state.data;
-      var now = new Date();
-      var thisMonth = monthStr(now);
-      var year = String(now.getFullYear());
-
-      var revMonth = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)) === thisMonth; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
-      var expMonthTotal = d.expenses.filter(function (e) { return (e.date || '').slice(0, 7) === thisMonth; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
-      var revYear = d.payments.filter(function (p) { return (p.month || (p.date || '').slice(0, 7)).slice(0, 4) === year; }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
-      var expYear = d.expenses.filter(function (e) { return (e.date || '').slice(0, 4) === year; }).reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
-
-      var wrap = el('<div class="space-y-4"></div>');
-
-      // P&L this month
-      var pnlMonth = revMonth - expMonthTotal;
-      wrap.appendChild(el(
-        '<div class="card p-4">' +
-          '<div class="text-sm font-semibold text-white mb-3">Profit &amp; Loss — ' + esc(thisMonth) + '</div>' +
-          '<div class="space-y-2 text-sm">' +
-            '<div class="flex justify-between"><span class="text-slate-400">Revenue</span><span class="text-emerald-400 font-semibold">' + esc(pkr(revMonth)) + '</span></div>' +
-            '<div class="flex justify-between"><span class="text-slate-400">Expenses</span><span class="text-red-400 font-semibold">' + esc(pkr(expMonthTotal)) + '</span></div>' +
-            '<div class="border-t border-slate-700 pt-2 flex justify-between"><span class="text-white font-semibold">Net</span>' +
-              '<span class="font-bold ' + (pnlMonth >= 0 ? 'text-emerald-400' : 'text-red-400') + '">' + esc(pkr(pnlMonth)) + '</span></div>' +
-          '</div>' +
-        '</div>'
-      ));
-
-      // P&L this year
-      var pnlYear = revYear - expYear;
-      wrap.appendChild(el(
-        '<div class="card p-4">' +
-          '<div class="text-sm font-semibold text-white mb-3">Year to date — ' + esc(year) + '</div>' +
-          '<div class="space-y-2 text-sm">' +
-            '<div class="flex justify-between"><span class="text-slate-400">Revenue</span><span class="text-emerald-400 font-semibold">' + esc(pkr(revYear)) + '</span></div>' +
-            '<div class="flex justify-between"><span class="text-slate-400">Expenses</span><span class="text-red-400 font-semibold">' + esc(pkr(expYear)) + '</span></div>' +
-            '<div class="border-t border-slate-700 pt-2 flex justify-between"><span class="text-white font-semibold">Net</span>' +
-              '<span class="font-bold ' + (pnlYear >= 0 ? 'text-emerald-400' : 'text-red-400') + '">' + esc(pkr(pnlYear)) + '</span></div>' +
-          '</div>' +
-        '</div>'
-      ));
-
-      // Expenses by category (this year)
-      var byCat = {};
-      d.expenses.filter(function (e) { return (e.date || '').slice(0, 4) === year; }).forEach(function (e) {
-        var c = e.category || 'Other'; byCat[c] = (byCat[c] || 0) + (Number(e.amount) || 0);
-      });
-      var cats = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
-      var catCard = el('<div class="card p-4"><div class="text-sm font-semibold text-white mb-3">Expenses by category — ' + esc(year) + '</div></div>');
-      if (!cats.length) catCard.appendChild(el('<div class="text-slate-500 text-sm">No expenses this year.</div>'));
-      else {
-        var maxV = byCat[cats[0]] || 1;
-        var rowsBox = el('<div class="space-y-2.5"></div>');
-        cats.forEach(function (c) {
-          var pct = Math.round((byCat[c] / maxV) * 100);
-          rowsBox.appendChild(el(
-            '<div>' +
-              '<div class="flex justify-between text-xs mb-1"><span class="text-slate-300">' + esc(c) + '</span><span class="text-slate-400">' + esc(pkr(byCat[c])) + '</span></div>' +
-              '<div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-indigo-500" style="width:' + pct + '%"></div></div>' +
-            '</div>'
-          ));
-        });
-        catCard.appendChild(rowsBox);
-      }
-      wrap.appendChild(catCard);
-
-      return wrap;
-    }
-
-    // ---------------------------------------------------------------------
-    // Service worker registration
-    // ---------------------------------------------------------------------
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js').catch(function (e) { /* ignore */ });
-      });
-    }
-
-    // ---------------------------------------------------------------------
-    // Boot
-    // ---------------------------------------------------------------------
-    function boot() {
-      render(); // shows login or loading immediately
-      if (state.token) {
-        refresh().catch(function () { /* handled */ });
-      }
-    }
-    boot();
-  })();
-  </script>
+/* ---- bootstrap ---- */
+document.addEventListener('DOMContentLoaded', async () => {
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeSlide(); closeModal(); } });
+  if (!getToken()) { showLogin(); return; }
+  try { await loadBootstrap(); render(); }
+  catch (e) {
+    // api() handles 401 by showing the login screen; other errors surface here.
+    if (getToken()) document.getElementById('app').innerHTML = '<div class="m-auto max-w-md text-center"><div class="text-lg font-semibold text-red-600">Could not reach the server</div><div class="mt-2 text-sm text-sub">' + e.message + '</div><div class="mt-2 text-sm text-sub">Check your connection, then reload.</div></div>';
+  }
+  // Register the service worker for offline shell + installability.
+  if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
+});
+</script>
 </body>
 </html>

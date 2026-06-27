@@ -8,10 +8,13 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const db = require('./db');
 const auth = require('./auth');
+const S = require('./serialize');
 
 const flag = (v) => (v ? 1 : 0);
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0; };
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(400).json({ error: e.message }));
+const pad2 = (n) => String(n).padStart(2, '0');
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
 
@@ -136,6 +139,8 @@ function buildRouter() {
   /* ---- authenticated (owner / staff) ---- */
   r.get('/me', auth.authRequired, (req, res) => res.json({ id: req.user.sub, username: req.user.username, role: req.user.role }));
 
+  // Returns the EXACT shape the copied app UI's loadBootstrap() expects:
+  // camelCase serialized rows + a settings block with gym/tiers/policy/version/logo defaults.
   r.get('/bootstrap', auth.authRequired, wrap(async (req, res) => {
     const [settings, members, payments, expenses, staff, checkins, staffCheckins] = await Promise.all([
       db.many('SELECT key, value FROM settings'),
@@ -146,9 +151,27 @@ function buildRouter() {
       db.many('SELECT * FROM checkins ORDER BY at DESC LIMIT 2000'),
       db.many('SELECT * FROM staff_checkins ORDER BY at DESC LIMIT 2000')
     ]);
-    const settingsObj = {};
-    for (const row of settings) { try { settingsObj[row.key] = JSON.parse(row.value); } catch (_) { settingsObj[row.key] = row.value; } }
-    res.json({ settings: settingsObj, members, payments, expenses, staff, checkins, staffCheckins });
+    // Parse settings rows (JSON values, bare strings passed through).
+    const raw = {};
+    for (const row of settings) { try { raw[row.key] = JSON.parse(row.value); } catch (_) { raw[row.key] = row.value; } }
+    res.json({
+      today: todayStr(),
+      settings: {
+        gym: raw.gym || {},
+        tiers: raw.tiers || {},
+        policy: raw.policy || { cycleDays: 30, dueSoonDays: 5 },
+        version: raw.version || '1.0.0',
+        logo: raw.logo || null
+      },
+      fingerprint: { mode: 'cloud', device: '', samplesRequired: 3 },
+      members: members.map(S.memberOut),
+      payments: payments.map(S.paymentOut),
+      expenses: expenses.map(S.expenseOut),
+      staff: staff.map(S.staffOut),
+      users: [],
+      checkins: checkins.map(S.checkinOut),
+      staffCheckins: staffCheckins.map(S.staffCheckinOut)
+    });
   }));
 
   // Owner enqueues a remote action; receptionists may not.

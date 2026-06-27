@@ -5,14 +5,21 @@
    - Navigations use network-first, falling back to the cached shell offline.
    - Other static assets use cache-first with background refresh. */
 
-const CACHE = 'demo-gym-v1';
+const CACHE = 'demo-gym-v3';
 const SHELL = [
   '/',
   '/index.html',
+  '/app.css',
+  '/chart.umd.js',
+  '/lucide.min.js',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
-  '/apple-touch-icon.png'
+  '/apple-touch-icon.png',
+  '/fonts/inter-400.woff2',
+  '/fonts/inter-500.woff2',
+  '/fonts/inter-600.woff2',
+  '/fonts/inter-700.woff2'
 ];
 
 self.addEventListener('install', (event) => {

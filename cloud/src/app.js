@@ -6,29 +6,25 @@ const cors = require('cors');
 const { buildRouter } = require('./routes');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-const CDN = 'https://cdnjs.cloudflare.com';
 
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);   // behind Railway's edge proxy: trust 1 hop so rate-limiting sees real client IPs
 
-  // helmet's default CSP blocks the SPA's CDN scripts + inline JS, and COEP/CORP
-  // can interfere with the service worker / manifest. Relax CSP to allow self +
-  // cdnjs (Tailwind/Chart.js) + inline scripts/styles + data: images, and drop
-  // the cross-origin isolation headers so the PWA loads cleanly.
+  // Everything is self-hosted now, so the CSP stays tight: only 'self' + inline
+  // scripts/styles (the SPA uses one inline <script> and an inline <style>).
+  // COEP off and CORP cross-origin so the service worker + manifest load cleanly.
   app.use(helmet({
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", CDN],
-        scriptSrcElem: ["'self'", "'unsafe-inline'", CDN],
-        styleSrc: ["'self'", "'unsafe-inline'", CDN],
-        styleSrcElem: ["'self'", "'unsafe-inline'", CDN],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'"],
-        fontSrc: ["'self'", 'data:', CDN],
+        fontSrc: ["'self'", 'data:'],
         workerSrc: ["'self'", 'blob:'],
         manifestSrc: ["'self'"],
         objectSrc: ["'none'"],

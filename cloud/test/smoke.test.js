@@ -80,7 +80,8 @@ test('device sync push is upserted and idempotent', async () => {
 
   const data = await (await get('/api/bootstrap', { authorization: 'Bearer ' + (await ownerToken()) })).json();
   assert.equal(data.members.length, 1);
-  assert.equal(data.members[0].code, 'A001');
+  // bootstrap now returns the serialized UI shape: member id = business code.
+  assert.equal(data.members[0].id, 'A001');
   assert.equal(data.payments.length, 1);
   assert.equal(data.expenses.length, 1);
   assert.equal(data.checkins.length, 1);          // idempotent despite double push
@@ -90,7 +91,8 @@ test('device sync push is upserted and idempotent', async () => {
 test('updates flow through (suspend a member via re-sync)', async () => {
   await post('/api/sync/push', { members: [{ code: 'A001', name: 'Asad', type: 'Basic', join_date: '2026-06-01', suspended: 1 }] }, DEV);
   const data = await (await get('/api/bootstrap', { authorization: 'Bearer ' + (await ownerToken()) })).json();
-  assert.equal(data.members[0].suspended, 1);
+  // serialized: suspended is a boolean (!!r.suspended)
+  assert.equal(data.members[0].suspended, true);
 });
 
 test('device auth rejects a bad token', async () => {
