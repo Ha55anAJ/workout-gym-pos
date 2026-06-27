@@ -112,3 +112,18 @@ test('owner enqueues a command, laptop pulls and acks it', async () => {
   const stillPending = await (await get('/api/sync/commands', DEV)).json();
   assert.ok(!stillPending.find((c) => c.id === cmd.id));
 });
+
+test('owner password re-syncs from OWNER_PASSWORD on each boot (stale-login fix)', async () => {
+  process.env.OWNER_PASSWORD = 'NewPass!234';
+  const res = await authmod.ensureOwner();
+  assert.equal(res.synced, true);
+  // the old password no longer works...
+  assert.equal((await post('/api/auth/login', { username: 'owner', password: 'secret123' })).status, 401);
+  // ...and the new env password does
+  const ok = await post('/api/auth/login', { username: 'owner', password: 'NewPass!234' });
+  assert.equal(ok.status, 200);
+  assert.ok((await ok.json()).token);
+  // restore for any later runs
+  process.env.OWNER_PASSWORD = 'secret123';
+  await authmod.ensureOwner();
+});

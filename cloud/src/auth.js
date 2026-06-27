@@ -50,18 +50,22 @@ function deviceAuth(req, res, next) {
   next();
 }
 
-// Create the first owner account from env, if it doesn't already exist.
+// Ensure the owner account matches the OWNER_* env vars. OWNER_PASSWORD is the
+// source of truth for the owner login: the account is created on first boot, and
+// its password is re-synced on every boot so changing the env var (then
+// redeploying) reliably resets the login. Trim values to avoid stray whitespace.
 async function ensureOwner() {
-  const username = process.env.OWNER_USERNAME;
+  const username = (process.env.OWNER_USERNAME || '').trim();
   const password = process.env.OWNER_PASSWORD;
   if (!username || !password) return { created: false, reason: 'OWNER_USERNAME/OWNER_PASSWORD not set' };
-  const existing = await db.one('SELECT id FROM accounts WHERE username=$1', [username]);
-  if (existing) return { created: false, reason: 'owner already exists' };
+  const name = process.env.OWNER_NAME || 'Gym Owner';
   const hash = await hashPassword(password);
-  await db.query(
-    'INSERT INTO accounts (username, name, role, password_hash) VALUES ($1,$2,$3,$4)',
-    [username, process.env.OWNER_NAME || 'Gym Owner', 'Owner', hash]
-  );
+  const existing = await db.one('SELECT id FROM accounts WHERE username=$1', [username]);
+  if (existing) {
+    await db.query('UPDATE accounts SET password_hash=$1, name=$2, role=$3 WHERE id=$4', [hash, name, 'Owner', existing.id]);
+    return { created: false, synced: true, reason: 'owner password synced from env' };
+  }
+  await db.query('INSERT INTO accounts (username, name, role, password_hash) VALUES ($1,$2,$3,$4)', [username, name, 'Owner', hash]);
   return { created: true };
 }
 
