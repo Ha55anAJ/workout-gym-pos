@@ -11,7 +11,8 @@ Method B later when you want a proper installer for the gym laptop.
 1. Go to **https://nodejs.org**
 2. Download the **LTS** version (the big green button, "Windows Installer").
 3. Run the downloaded `.msi`, click **Next** through the wizard, accept the
-   defaults, and finish. (This installs `node` and `npm`.)
+   defaults, and finish. (This installs `node` and `npm`. Any current version
+   works — Node 22.5+ including Node 24 — and **no Python or build tools are needed**.)
 
 ### Step 2 — Unzip the app
 1. Right-click **`gym-manager.zip`** → **Extract All…**
@@ -92,3 +93,7 @@ reader (Members → Add new member → capture 3 samples).
   (it downloads the app's components). After that it runs offline.
 - **The black window closed and the app stopped** — that's expected; reopen
   `Start Demo Gym.bat`. Use Method B if you want it to run on its own.
+- **You saw `ERR_DLOPEN_FAILED` or a "Python not found" error on an earlier
+  version** — fixed in this build (it now uses the SQLite engine built into
+  Node, so nothing compiles). Delete the `node_modules` folder and run the
+  launcher again.

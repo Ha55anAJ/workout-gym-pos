@@ -23,16 +23,16 @@ a real database and real APIs, so data persists and is shared across the app.
 - **Roles** — switch between **Owner** (everything) and **Receptionist** (Dashboard, Scan, Members, Payments only).
 - **Local backup & restore** — one-click backup saves the entire database as a single `.db` file (to the app's `backups/` folder and your Downloads). Restore re-loads everything from a chosen backup file. Plus CSV export for Excel.
 
-All money is in **PKR**; the seeded demo data is set in a Pakistani context and is
-generated relative to today's date so statuses (paid / due soon / overdue) are
-realistic on first run.
+All money is in **PKR**. A fresh install starts **empty** — you add your own
+members, staff, users and gym details. (If you ever want sample data for a
+walkthrough, run `node server/seed.js --demo`.)
 
 ---
 
 ## Requirements
 
 - **Windows 10/11** (the gym laptop). macOS/Linux also work for development.
-- **Node.js LTS** (v18 or newer) — https://nodejs.org
+- **Node.js 22.5 or newer** — https://nodejs.org (current LTS, or Node 24 — both fine). No Python or build tools required.
 - **ZKTeco ZK9500** reader, its **USB driver**, and the **ZKFinger SDK** (only needed for live fingerprint capture — see below). The app runs fully without it in simulation mode.
 
 ---
@@ -116,13 +116,14 @@ that file to back it up manually.
 ## Useful commands
 
 ```
-npm start                 # run the app
-node server/seed.js       # seed demo data only if the database is empty
-node server/seed.js --reset   # wipe everything and re-seed fresh demo data
+npm start                    # run the app
+node server/seed.js          # initialise a clean install if the database is empty
+node server/seed.js --reset  # wipe everything back to a clean, empty install
+node server/seed.js --demo   # load sample data (for a demo/walkthrough only)
 ```
 
-To start completely empty (no demo data), delete `data/gym.db` before first run
-— or reset and then clear it; new members/payments you add are kept.
+The app starts empty by default. To wipe an existing install back to empty,
+stop the app and delete the `data` folder (or run `node server/seed.js --reset`).
 
 ---
 
@@ -185,7 +186,7 @@ gym-manager/
 
 - **"Could not reach the server" in the browser** — the server isn't running; start it with `npm start` or the `.bat`.
 - **Port already in use** — set a different `PORT` (e.g. `set PORT=5000 && npm start`).
-- **`better-sqlite3` failed to install** — make sure you're on Node.js LTS; on Windows you may need the "Desktop development with C++" build tools, though prebuilt binaries usually download automatically.
+- **`ERR_DLOPEN_FAILED` or "find Python" / node-gyp errors** — these were from an older build that used a compiled database module. This version uses the SQLite engine built into Node, so they no longer apply: delete the `node_modules` folder and re-run the launcher.
 - **Reader not detected** — confirm the USB driver is installed (it shows in Device Manager), the ZKFinger SDK is installed, and `libzkfp.dll` is on PATH or set `ZK_LIB_PATH`. Run with `FINGERPRINT_MODE=device` to see the exact error.
 - **Fingerprint won't match a seeded member** — expected: seed members have no real template. Enroll the member on the device first.
 

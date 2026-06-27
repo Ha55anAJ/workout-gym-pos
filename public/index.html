@@ -74,7 +74,8 @@ let VERSION = '1.0.0';
 let fpStatus = { mode: 'simulation', device: '', samplesRequired: 3 };
 let ENROLL_SAMPLES = 3;
 
-let members = [], payments = [], expenses = [], staff = [], users = [], checkins = [];
+let members = [], payments = [], expenses = [], staff = [], users = [], checkins = [], staffCheckins = [];
+let LOGO = null;
 
 const TIER_NAMES = ['Basic', 'Premium', 'Student', 'Family'];
 const METHODS = ['Cash', 'Card', 'Easypaisa', 'JazzCash'];
@@ -130,6 +131,8 @@ function outstandingTotal() {
 }
 function memberSpend(id) { return payments.filter(p => p.memberId === id).reduce((t, p) => t + p.amount, 0); }
 function memberVisits(id, days) { const since = addDays(TODAY, -days); return checkins.filter(c => c.memberId === id && c.at >= since).length; }
+function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, d.getDate(), 12, 0, 0); }
+function paidOnOrAfter(id, date) { const t = stripTime(date).getTime(); return payments.some(p => p.memberId === id && stripTime(p.date).getTime() >= t); }
 function monthlySeries(n) {
   const out = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -170,6 +173,7 @@ function reviveCheckin(c) { c.at = dTime(c.at); return c; }
 async function loadBootstrap() {
   const b = await api('/bootstrap');
   GYM = b.settings.gym; TIERS = b.settings.tiers; POLICY = b.settings.policy; VERSION = b.settings.version;
+  LOGO = b.settings.logo || null;
   TODAY = dOnly(b.today);
   fpStatus = b.fingerprint; ENROLL_SAMPLES = fpStatus.samplesRequired || 3;
   members = b.members.map(reviveMember);
@@ -178,12 +182,13 @@ async function loadBootstrap() {
   staff = b.staff;
   users = b.users;
   checkins = b.checkins.map(reviveCheckin);
+  staffCheckins = (b.staffCheckins || []).map((c) => { c.at = dTime(c.at); return c; });
   document.title = (GYM.name || 'Demo Gym') + ' — Management System';
 }
 
 /* ---- state + nav ---- */
-const state = { role: 'Owner', page: 'dashboard', userMenuOpen: false, memberSearch: '', memberFilter: 'All', payMethod: 'All', paySearch: '', payFrom: '', payTo: '', expCat: 'All', expFrom: '', expTo: '', lastBackup: new Date(Date.now() - 2 * 3600 * 1000) };
-const ROLE_USER = { Owner: 'Faisal Tariq', Receptionist: 'Sana Khan' };
+const state = { role: 'Owner', page: 'dashboard', userMenuOpen: false, memberSearch: '', memberFilter: 'All', payMethod: 'All', paySearch: '', payFrom: '', payTo: '', expCat: 'All', expFrom: '', expTo: '', lastBackup: null };
+const ROLE_USER = { Owner: 'Owner', Receptionist: 'Receptionist' };
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', roles: ['Owner', 'Receptionist'] },
   { id: 'scan', label: 'Scan', icon: 'fingerprint', roles: ['Owner', 'Receptionist'] },
@@ -207,7 +212,7 @@ function render() {
   const sidebar = `
     <nav class="flex w-[240px] shrink-0 flex-col border-r border-line bg-white">
       <div class="flex items-center gap-2.5 px-5 h-16 border-b border-line">
-        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white font-bold">${(GYM.name || 'D').trim().charAt(0).toUpperCase()}</span>
+        ${LOGO ? `<img src="${LOGO}" class="h-8 w-8 rounded-lg object-cover" alt="logo" />` : `<span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white font-bold">${(GYM.name || 'D').trim().charAt(0).toUpperCase()}</span>`}
         <div class="leading-tight"><div class="text-[15px] font-semibold">${GYM.name || 'Demo Gym'}</div><div class="text-[11px] text-sub">${GYM.city || ''}</div></div>
       </div>
       <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
@@ -223,13 +228,13 @@ function render() {
       <div><h1 class="text-lg font-semibold leading-none">${pageTitle}</h1><p class="mt-1 text-[12px] text-sub">${fmtDateLong(TODAY)}</p></div>
       <div class="relative">
         <button onclick="toggleUserMenu()" class="flex items-center gap-2.5 rounded-lg border border-line px-2.5 py-1.5 text-sm hover:bg-gray-50">
-          ${avatar(ROLE_USER[state.role], 28)}
-          <span class="text-left leading-tight"><span class="block text-[12px] text-sub">${state.role}</span><span class="block font-medium">${ROLE_USER[state.role]}</span></span>
+          ${avatar(state.role, 28)}
+          <span class="text-left leading-tight"><span class="block text-[12px] text-sub">Signed in as</span><span class="block font-medium">${state.role}</span></span>
           <i data-lucide="chevron-down" class="h-4 w-4 text-sub"></i>
         </button>
         ${state.userMenuOpen ? `<div class="absolute right-0 mt-1 w-60 rounded-lg border border-line bg-white p-1.5 shadow-lg z-20">
           <div class="px-2 py-1 text-[11px] uppercase tracking-wide text-sub">Switch role</div>
-          ${['Owner','Receptionist'].map(r => `<button onclick="setRole('${r}')" class="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-gray-100"><span class="flex items-center gap-2">${avatar(ROLE_USER[r], 24)} <span><span class="block font-medium">${ROLE_USER[r]}</span><span class="block text-[11px] text-sub">${r}</span></span></span>${state.role === r ? '<i data-lucide="check" class="h-4 w-4 text-accent"></i>' : ''}</button>`).join('')}
+          ${['Owner','Receptionist'].map(r => `<button onclick="setRole('${r}')" class="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-gray-100"><span class="flex items-center gap-2">${avatar(r, 24)} <span class="font-medium">${r}</span></span>${state.role === r ? '<i data-lucide="check" class="h-4 w-4 text-accent"></i>' : ''}</button>`).join('')}
         </div>` : ''}
       </div>
     </header>`;
@@ -279,12 +284,7 @@ PAGES.scan = {
   render() {
     return `<div class="mx-auto max-w-2xl">
       <div id="scan-card" class="rounded-2xl border border-line bg-white p-10 text-center">${scanInner()}</div>
-      <div class="mt-5 grid grid-cols-3 gap-3">
-        <button onclick="simulateScan('paid')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — paid member</button>
-        <button onclick="simulateScan('overdue')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — overdue member</button>
-        <button onclick="simulateScan('unknown')" class="rounded-lg border border-line bg-white px-3 py-3 text-sm font-medium hover:bg-gray-50">Simulate scan — unknown</button>
-      </div>
-      <div class="mt-3 text-center text-[12px] text-sub">${fpStatus.mode === 'device' ? 'ZK9500 connected — place a finger on the reader to check in automatically.' : 'Simulation mode (no scanner detected). Use the buttons above, or connect a ZK9500 and restart.'}</div>
+      <div class="mt-3 text-center text-[12px] text-sub">${fpStatus.mode === 'device' ? 'ZK9500 connected - place a finger on the reader to check a member in.' : 'No fingerprint reader detected. Connect the ZK9500 and restart to enable scanning. You can still check a member in by ID below.'}</div>
       <div class="mt-5 rounded-xl border border-line bg-white p-4">
         <div class="text-[12px] font-medium text-sub mb-2">Manual lookup</div>
         <div class="flex gap-2"><input id="manual-id" placeholder="Enter member ID, e.g. A012" class="flex-1 rounded-lg border border-line px-3 py-2 text-sm" onkeydown="if(event.key==='Enter')manualLookup()" /><button onclick="manualLookup()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Look up</button></div>
@@ -296,23 +296,19 @@ PAGES.scan = {
 function scanInner() {
   if (scanState.mode === 'reading') return `<div class="scan-pulse mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft"><i data-lucide="fingerprint" class="h-14 w-14 text-accent"></i></div><div class="mt-6 text-lg font-semibold">Reading…</div><div class="mt-1 text-sm text-sub">Hold finger steady on the scanner</div>`;
   if (scanState.mode === 'unknown') return `<div class="mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-red-50"><i data-lucide="user-x" class="h-14 w-14 text-red-500"></i></div><div class="mt-6 text-lg font-semibold">No match found</div><div class="mt-1 text-sm text-sub">Fingerprint not recognised. Try again or use manual lookup.</div>`;
+  if (scanState.mode === 'staff' && scanState.staff) {
+    const s = scanState.staff;
+    return `<div class="flex items-center gap-5 text-left">${avatar(s.name, 80)}<div class="flex-1"><div class="text-[12px] text-sub">${s.id} · Staff</div><div class="text-2xl font-semibold">${s.name}</div><div class="mt-1 text-sm text-sub">${s.role}</div></div><div class="text-right"><span class="inline-flex rounded-lg bg-indigo-100 px-4 py-2 text-base font-bold uppercase tracking-wide text-indigo-700">Staff</span></div></div><div class="mt-6 text-left"><span class="inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-2.5 text-sm font-semibold text-green-800"><i data-lucide="check-circle-2" class="h-5 w-5"></i>Attendance recorded${scanState.checkinTime ? ' · ' + scanState.checkinTime : ''}</span></div>`;
+  }
   if (scanState.member) {
     const m = scanState.member, s = statusOf(m), due = dueDateOf(m);
     const sinceTxt = m.lastPayment ? daysBetween(m.lastPayment, TODAY) + ' days ago' : '—';
-    return `<div class="flex items-center gap-5 text-left">${avatar(m.name, 80)}<div class="flex-1"><div class="text-[12px] text-sub">${m.id} · ${m.type}</div><div class="text-2xl font-semibold">${m.name}</div><div class="mt-1 text-sm text-sub">Last payment: ${m.lastPayment ? fmtDateLong(m.lastPayment) : '—'} (${sinceTxt})</div><div class="text-sm text-sub">Due date: ${due ? fmtDateLong(due) : '—'}</div></div><div class="text-right">${bigPill(s)}</div></div>${(s === 'Overdue' || s === 'Due soon') ? `<div class="mt-6 text-left"><button onclick="scanMarkPaid()" class="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Mark payment received</button></div>` : ''}`;
+    return `<div class="flex items-center gap-5 text-left">${avatar(m.name, 80)}<div class="flex-1"><div class="text-[12px] text-sub">${m.id} · ${m.type}</div><div class="text-2xl font-semibold">${m.name}</div><div class="mt-1 text-sm text-sub">Last payment: ${m.lastPayment ? fmtDateLong(m.lastPayment) : '—'} (${sinceTxt})</div><div class="text-sm text-sub">Due date: ${due ? fmtDateLong(due) : '—'}</div></div><div class="text-right">${bigPill(s)}</div></div><div class="mt-6 text-left flex items-center gap-3">${scanState.checkedIn ? `<span class="inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-2.5 text-sm font-semibold text-green-800"><i data-lucide="check-circle-2" class="h-5 w-5"></i>Checked in${scanState.checkinTime ? ' · ' + scanState.checkinTime : ''}</span>` : `<button onclick="scanCheckIn('${m.id}')" class="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Check in</button>`}${(s === 'Overdue' || s === 'Due soon') ? `<button onclick="scanMarkPaid()" class="rounded-lg border border-line px-5 py-2.5 text-sm font-medium hover:bg-gray-50">Mark payment received</button>` : ''}</div>`;
   }
-  return `<div class="${fpStatus.mode === 'device' ? 'scan-pulse ' : ''}mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft"><i data-lucide="fingerprint" class="h-14 w-14 text-accent"></i></div><div class="mt-6 text-lg font-semibold">Place finger on scanner</div><div class="mt-1 text-sm text-sub">Or use one of the demo buttons below to simulate a scan.</div>`;
+  return `<div class="${fpStatus.mode === 'device' ? 'scan-pulse ' : ''}mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft"><i data-lucide="fingerprint" class="h-14 w-14 text-accent"></i></div><div class="mt-6 text-lg font-semibold">Place finger on scanner</div><div class="mt-1 text-sm text-sub">The member&#39;s details will appear here.</div>`;
 }
 function bigPill(s) { const map = { 'Paid':'bg-green-100 text-green-800','Due soon':'bg-amber-100 text-amber-800','Overdue':'bg-red-100 text-red-700','Not enrolled':'bg-gray-100 text-gray-600','Suspended':'bg-gray-200 text-gray-700' }; return `<span class="inline-flex rounded-lg px-4 py-2 text-base font-bold uppercase tracking-wide ${map[s] || ''}">${s}</span>`; }
-async function simulateScan(kind) {
-  scanState = { member: null, mode: 'reading' }; refreshScan();
-  try {
-    const r = await api('/fingerprint/simulate', { method: 'POST', body: { kind } });
-    if (r.none) { scanState = { mode: 'unknown' }; ding(false); }
-    else { const m = reviveMember(r.member); upsertMember(m); if (r.checkin) { checkins.unshift(reviveCheckin(r.checkin)); } scanState = { member: m, mode: 'member' }; ding(statusOf(m) === 'Paid'); }
-  } catch (e) { scanState = { mode: 'unknown' }; ding(false); }
-  refreshScan();
-}
+/* simulate scan removed for production */
 function manualLookup() {
   const v = (document.getElementById('manual-id').value || '').trim().toUpperCase();
   const m = members.find(x => x.id === v);
@@ -320,6 +316,7 @@ function manualLookup() {
   refreshScan();
 }
 async function scanMarkPaid() { const m = scanState.member; if (!m) return; await recordPaymentFor(m, TIERS[m.type], 'Cash', 'Front-desk scan payment'); scanState.member = members.find(x => x.id === m.id); refreshScan(); }
+async function scanCheckIn(id) { const m = members.find(x => x.id === id) || scanState.member; if (!m) return; try { const rc = reviveCheckin(await api('/checkins', { method: 'POST', body: { memberId: m.id } })); checkins.unshift(rc); if (scanState.member && scanState.member.id === m.id) { scanState.checkedIn = true; scanState.checkinTime = fmtTime(rc.at); refreshScan(); } toast('Checked in: ' + m.name); } catch (e) { toast(e.message); } }
 function refreshScan() { const el = document.getElementById('scan-card'); if (!el) return; el.innerHTML = scanInner(); el.classList.remove('flash-ok', 'flash-bad'); if (window.lucide) lucide.createIcons(); }
 function ding(ok) {
   const el = document.getElementById('scan-card'); if (el) { void el.offsetWidth; el.classList.add(ok ? 'flash-ok' : 'flash-bad'); }
@@ -452,7 +449,7 @@ PAGES.staff = {
 PAGES.settings = {
   render() {
     return `<div class="grid grid-cols-2 gap-4 max-w-5xl">
-      ${card('Gym details', `<div class="space-y-3">${field('Gym name','set-name',GYM.name||'')}${field('Address','set-addr',GYM.address||'')}${field('City','set-city',GYM.city||'')}${field('Phone','set-phone',GYM.phone||'')}<div><div class="text-[12px] font-medium text-sub mb-1">Logo</div><div class="flex h-20 items-center justify-center rounded-lg border border-dashed border-line text-[12px] text-sub">Drop logo here or click to upload</div></div><button onclick="saveGymDetails()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save details</button></div>`)}
+      ${card('Gym details', `<div class="space-y-3">${field('Gym name','set-name',GYM.name||'')}${field('Address','set-addr',GYM.address||'')}${field('City','set-city',GYM.city||'')}${field('Phone','set-phone',GYM.phone||'')}<div><div class="text-[12px] font-medium text-sub mb-1">Logo</div><div id="logo-area">${logoArea()}</div><input id="logo-file" type="file" accept="image/png,image/jpeg,image/svg+xml" class="hidden" onchange="onLogoFile(this)" /></div><button onclick="saveGymDetails()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save details</button></div>`)}
       ${card('Membership tiers', `<div class="space-y-2">${TIER_NAMES.map(t => `<div class="flex items-center justify-between gap-3"><span class="text-sm font-medium w-24">${t}</span><div class="flex items-center gap-2 flex-1"><span class="text-sub text-sm">PKR</span><input id="tier-${t}" type="number" value="${TIERS[t]}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /><span class="text-sub text-sm whitespace-nowrap">/ month</span></div></div>`).join('')}<button onclick="saveTiers()" class="mt-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save tiers</button></div>`)}
       ${card('Fee policy', `<div class="space-y-3"><div class="flex items-center justify-between gap-3"><span class="text-sm">Billing cycle (days)</span><input id="pol-cycle" type="number" value="${POLICY.cycleDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><div class="flex items-center justify-between gap-3"><span class="text-sm">"Due soon" warning (days before)</span><input id="pol-due" type="number" value="${POLICY.dueSoonDays}" class="w-24 rounded-lg border border-line px-3 py-2 text-sm" /></div><button onclick="savePolicy()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save policy</button></div>`)}
       ${card('Backup', `<div class="space-y-3"><div class="flex items-center gap-2 text-sm text-sub"><i data-lucide="clock" class="h-4 w-4"></i> Last backup: <span class="font-medium text-ink">${lastBackupText()}</span></div><div class="rounded-lg border border-line bg-panel p-3 text-[12px] text-sub leading-relaxed">Backups save the full database as a single <span class="font-medium text-ink">.db</span> file on this computer (in the app's <span class="font-mono">backups</span> folder and to your Downloads). Restore re-loads every record from a chosen backup file.</div><div class="flex flex-wrap gap-2"><button onclick="backupNow()" class="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><i data-lucide="download" class="h-4 w-4"></i>Back up now</button><button onclick="exportEverything()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Export everything to Excel</button><button onclick="document.getElementById('restore-input').click()" class="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50"><i data-lucide="upload" class="h-4 w-4"></i>Restore from backup file</button></div><div id="backup-meta" class="text-[12px] text-sub"></div></div>`)}
@@ -465,14 +462,16 @@ PAGES.settings = {
 function field(label, id, val) { return `<div><div class="text-[12px] font-medium text-sub mb-1">${label}</div><input id="${id}" value="${val}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>`; }
 
 /* ============================ SLIDE-OVERS / MODAL / TOAST ============================ */
+let _slideTimer = null;
 function openSlide(title, body) {
+  if (_slideTimer) { clearTimeout(_slideTimer); _slideTimer = null; }
   const panel = document.getElementById('slideover-panel');
   panel.innerHTML = `<div class="flex items-center justify-between border-b border-line px-6 h-16 shrink-0"><h2 class="text-base font-semibold">${title}</h2><button onclick="closeSlide()" class="rounded-lg p-2 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><div class="flex-1 overflow-y-auto p-6">${body}</div>`;
   document.getElementById('slideover').classList.remove('hidden');
   requestAnimationFrame(() => panel.classList.remove('translate-x-full'));
   if (window.lucide) lucide.createIcons();
 }
-function closeSlide() { const panel = document.getElementById('slideover-panel'); panel.classList.add('translate-x-full'); setTimeout(() => document.getElementById('slideover').classList.add('hidden'), 280); }
+function closeSlide() { const panel = document.getElementById('slideover-panel'); panel.classList.add('translate-x-full'); _slideTimer = setTimeout(() => document.getElementById('slideover').classList.add('hidden'), 280); }
 function openModal(html) { document.getElementById('modal-card').innerHTML = html; const m = document.getElementById('modal'); m.classList.remove('hidden'); m.classList.add('flex'); if (window.lucide) lucide.createIcons(); }
 function closeModal() { const m = document.getElementById('modal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 let _toastT; function toast(msg) { document.getElementById('toast-msg').textContent = msg; const t = document.getElementById('toast'); t.classList.remove('hidden'); clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.add('hidden'), 2600); }
@@ -491,7 +490,7 @@ function openMember(id) {
       ${owner ? infoCell('Total spend', pkr(memberSpend(id))) : infoCell('Visits (90d)', memberVisits(id, 90))}
     </div>
     <div class="mt-5 flex flex-wrap gap-2">
-      <button onclick="closeSlide();openPaymentForm('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button>
+      <button onclick="openPaymentForm('${m.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button>
       <button onclick="openEditMember('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Edit</button>
       <button onclick="toggleSuspend('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${m.suspended ? 'Re-activate' : 'Suspend membership'}</button>
       <button onclick="openEnroll('${m.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${m.fingerprint ? 'Re-enroll fingerprint' : 'Enroll fingerprint'}</button>
@@ -516,13 +515,39 @@ async function toggleSuspend(id) {
 /* ---- staff detail ---- */
 function openStaff(id) {
   const s = staff.find(x => x.id === id); if (!s) return;
-  let salRows = ''; for (let i = 0; i < 6; i++) { const d = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 3); salRows += `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtMonth(d)}</td><td class="py-2 text-right font-medium">${s.salary ? pkr(s.salary) : '—'}</td><td class="py-2 pl-3 text-right text-green-600 text-[12px]">Paid</td></tr>`; }
-  let att = ''; for (let i = 13; i >= 0; i--) { const d = addDays(TODAY, -i); const dow = d.getDay(); const worked = !(s.status === 'on leave' && i < 6) && dow !== 0; att += `<div title="${fmtDate(d)}" style="width:20px;height:20px;border-radius:4px;background:${worked ? '#16a34a' : '#eef2f6'}"></div>`; }
-  const body = `<div class="flex items-center gap-4">${avatar(s.name, 64)}<div><div class="text-xl font-semibold">${s.name}</div><div class="text-sm text-sub">${s.role} · ${s.phone}</div><div class="mt-1 text-sm">Monthly salary: <span class="font-medium">${s.salary ? pkr(s.salary) : '—'}</span></div></div></div>
-    <div class="mt-5 flex gap-2"><button onclick="toast('Staff details saved')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Edit</button></div>
-    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Salary history</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium text-right">Amount</th><th class="pb-1 font-medium text-right">Status</th></tr></thead><tbody>${salRows}</tbody></table></div>
-    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 14 days</div><div style="display:grid;grid-template-columns:repeat(14,20px);gap:5px">${att}</div></div>`;
+  // Real salary history: salary expenses recorded for this person, earliest first.
+  const salPays = expenses.filter(e => e.category === 'Salaries' && (e.description || '').includes(s.name)).slice().sort((a, b) => a.date - b.date);
+  const salRows = salPays.length ? salPays.map(e => `<tr class="border-t border-line"><td class="py-2 pr-3 text-sub">${fmtDate(e.date)}</td><td class="py-2 pr-3">${fmtMonth(e.date)}</td><td class="py-2 text-right font-medium">${pkr(e.amount)}</td><td class="py-2 pl-3 text-right text-green-600 text-[12px]">Paid</td></tr>`).join('') : `<tr><td colspan="4" class="py-4 text-center text-sub text-[13px]">No salary payments recorded yet</td></tr>`;
+  // Real attendance: staff fingerprint check-ins, last 14 days.
+  let att = ''; for (let i = 13; i >= 0; i--) { const d = addDays(TODAY, -i); const n = staffCheckins.filter(c => c.staffId === s.id && daysBetween(c.at, d) === 0).length; att += `<div title="${fmtDate(d)} · ${n} check-in(s)" style="width:20px;height:20px;border-radius:4px;background:${n ? '#16a34a' : '#eef2f6'}"></div>`; }
+  const totalAtt = staffCheckins.filter(c => c.staffId === s.id).length;
+  const body = `<div class="flex items-center gap-4">${avatar(s.name, 64)}<div><div class="text-xl font-semibold">${s.name}</div><div class="text-sm text-sub">${s.role} · ${s.phone || '—'}</div><div class="mt-1 text-sm">Monthly salary: <span class="font-medium">${s.salary ? pkr(s.salary) : '—'}</span> · ${s.status === 'on leave' ? '<span class="text-amber-700">On leave</span>' : '<span class="text-green-700">Active</span>'}</div></div></div>
+    <div class="mt-4 grid grid-cols-2 gap-3 text-sm">${infoCell('Joined', s.join ? fmtDateLong(dOnly(s.join)) : '—')}${infoCell('Fingerprint', s.fingerprint ? ('Enrolled · ' + (s.fingerprintSamples || ENROLL_SAMPLES) + ' samples') : 'Not enrolled')}</div>
+    <div class="mt-5 flex flex-wrap gap-2">
+      <button onclick="openEditStaff('${s.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Edit</button>
+      <button onclick="openEnroll('${s.id}','staff')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">${s.fingerprint ? 'Re-enroll fingerprint' : 'Enroll fingerprint'}</button>
+    </div>
+    <div class="mt-6"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Salary payments</div><table class="w-full text-left text-[13px]"><thead><tr class="text-[11px] uppercase tracking-wide text-sub"><th class="pb-1 font-medium">Date</th><th class="pb-1 font-medium">Month</th><th class="pb-1 font-medium text-right">Amount</th><th class="pb-1 font-medium text-right">Status</th></tr></thead><tbody>${salRows}</tbody></table></div>
+    <div class="mt-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-sub mb-2">Attendance · last 14 days ${totalAtt ? `<span class="text-sub font-normal">(${totalAtt} check-ins total)</span>` : ''}</div><div style="display:grid;grid-template-columns:repeat(14,20px);gap:5px">${att}</div>${totalAtt ? '' : '<div class="mt-2 text-[12px] text-sub">No check-ins yet — staff check in by scanning their finger on the Scan page.</div>'}</div>`;
   openSlide('Staff detail', body);
+}
+function openEditStaff(id) {
+  const s = staff.find(x => x.id === id); if (!s) return;
+  openSlide('Edit staff', `<div class="space-y-4 max-w-md">
+    <div><div class="text-[12px] font-medium text-sub mb-1">Name</div><input id="es-name" value="${s.name}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Role</div><select id="es-role" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Owner','Receptionist','Trainer','Cleaner'].map(r => `<option ${s.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="es-phone" value="${s.phone || ''}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Monthly salary (PKR)</div><input id="es-salary" type="number" value="${s.salary}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Status</div><select id="es-status" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['active','on leave'].map(x => `<option ${s.status === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitEditStaff('${s.id}')" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save changes</button><button onclick="openStaff('${s.id}')" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+  </div>`);
+}
+async function submitEditStaff(id) {
+  try {
+    const s = await api('/staff/' + id, { method: 'PUT', body: { name: document.getElementById('es-name').value, role: document.getElementById('es-role').value, phone: document.getElementById('es-phone').value, salary: Number(document.getElementById('es-salary').value), status: document.getElementById('es-status').value } });
+    const i = staff.findIndex(x => x.id === id); if (i >= 0) staff[i] = s; else staff.push(s);
+    toast('Staff updated'); render(); openStaff(id);
+  } catch (e) { toast(e.message); }
 }
 
 /* ---- reports detail ---- */
@@ -535,7 +560,17 @@ function reportBody(id) {
   else if (id === 'mexp') { const cats = ['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other']; const colors = ['#4f46e5','#2563eb','#0891b2','#7c3aed','#0d9488','#d97706','#ea580c','#6b7280']; const ms = []; for (let i = 11; i >= 0; i--) ms.push(new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1)); const data = cats.map((c, ci) => ({ label: c, backgroundColor: colors[ci], data: ms.map(b => expenses.filter(e => monthKey(e.date) === monthKey(b) && e.category === c).reduce((t, e) => t + e.amount, 0)) })); el.innerHTML = `<div style="height:260px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Total'], ms.map(b => [MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2), pkr(expenses.filter(e => monthKey(e.date) === monthKey(b)).reduce((t, e) => t + e.amount, 0))]))}`; chart('r-canvas', { type: 'bar', data: { labels: ms.map(b => MONTHS[b.getMonth()] + ' ' + String(b.getFullYear()).slice(2)), datasets: data }, options: barOpts(true, true) }); }
   else if (id === 'pnl') { const s = monthlySeries(12); el.innerHTML = `<div style="height:240px"><canvas id="r-canvas"></canvas></div>${reportTable(['Month','Revenue','Expenses','Net profit'], s.map(x => [x.label, pkr(x.rev), pkr(x.exp), netCell(x.rev - x.exp)]))}`; chart('r-canvas', { type: 'line', data: { labels: s.map(x => x.label), datasets: [{ label: 'Revenue', data: s.map(x => x.rev), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }, { label: 'Expenses', data: s.map(x => x.exp), borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2 }] }, options: lineOpts(true) }); }
   else if (id === 'lapsed') { const lapsed = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 30); const buckets = { '31–60 days': [], '61–90 days': [], 'Over 90 days': [] }; lapsed.forEach(m => { const d = daysOverdue(m); if (d <= 60) buckets['31–60 days'].push(m); else if (d <= 90) buckets['61–90 days'].push(m); else buckets['Over 90 days'].push(m); }); el.innerHTML = Object.keys(buckets).map(k => `<div class="mb-4"><div class="mb-2 flex items-center gap-2 text-sm font-semibold">${k} <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-sub">${buckets[k].length}</span></div>${buckets[k].length ? `<table class="w-full text-left text-[13px]"><tbody>${buckets[k].map(m => `<tr class="border-t border-line cursor-pointer row-hover" onclick="closeSlide();openMember('${m.id}')"><td class="py-2"><span class="flex items-center gap-2">${avatar(m.name, 24)}${m.name}</span></td><td class="py-2 text-sub">${m.id}</td><td class="py-2 text-right text-red-600">${daysOverdue(m)} days</td><td class="py-2 text-right">${pkr(TIERS[m.type])}</td></tr>`).join('')}</tbody></table>` : '<div class="text-[13px] text-sub">None</div>'}</div>`).join(''); }
-  else if (id === 'retention') { const rows = []; for (let i = 7; i >= 0; i--) { const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1); const joined = members.filter(m => monthKey(m.joinDate) === monthKey(base)).length || (4 + (i % 5)); rows.push([fmtMonth(base), joined, i >= 1 ? Math.round(joined * 0.96) : '—', i >= 3 ? Math.round(joined * 0.84) : '—', i >= 6 ? Math.round(joined * 0.71) : '—', i >= 12 ? Math.round(joined * 0.58) : '—']); } el.innerHTML = `<p class="mb-3 text-[13px] text-sub">Members who joined each month and how many were still paying after N months.</p>${reportTable(['Cohort','Joined','1 mo','3 mo','6 mo','12 mo'], rows)}`; }
+  else if (id === 'retention') {
+    const rows = [];
+    for (let i = 17; i >= 0; i--) {   // earliest cohort first; only months that had sign-ups
+      const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - i, 1);
+      const cohort = members.filter(m => monthKey(m.joinDate) === monthKey(base));
+      if (!cohort.length) continue;
+      const ret = (n) => i < n ? '—' : cohort.filter(m => paidOnOrAfter(m.id, addMonths(m.joinDate, n))).length;
+      rows.push([fmtMonth(base), cohort.length, ret(1), ret(3), ret(6), ret(12)]);
+    }
+    el.innerHTML = `<p class="mb-3 text-[13px] text-sub">Members who joined each month and how many were still paying after N months. Computed from real join dates and payments; "—" means that many months haven't passed yet.</p>${rows.length ? reportTable(['Cohort','Joined','1 mo','3 mo','6 mo','12 mo'], rows) : emptyState('repeat', 'No member sign-ups yet')}`;
+  }
   else if (id === 'topvisits') { const rows = members.map(m => ({ m, v: memberVisits(m.id, 90) })).sort((a, b) => b.v - a.v).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Visits (90d)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, x.v])); }
   else if (id === 'topspend') { const rows = members.map(m => ({ m, s: memberSpend(m.id) })).sort((a, b) => b.s - a.s).slice(0, 20); el.innerHTML = reportTable(['#','Member','ID','Total paid (12mo)'], rows.map((x, i) => [i + 1, `<span class="flex items-center gap-2">${avatar(x.m.name, 22)}${x.m.name}</span>`, x.m.id, pkr(x.s)])); }
   else if (id === 'yearend') { const s12 = monthlySeries(12); const rev = s12.reduce((t, x) => t + x.rev, 0), exp = s12.reduce((t, x) => t + x.exp, 0), net = rev - exp; const newJoin = members.filter(m => daysBetween(m.joinDate, TODAY) <= 365).length; const lost = members.filter(m => statusOf(m) === 'Overdue' && daysOverdue(m) > 60).length; const prevRev = Math.round(rev * 0.86), prevExp = Math.round(exp * 0.91), prevNet = prevRev - prevExp; el.innerHTML = `<div class="grid grid-cols-2 gap-3">${yeKpi('Total revenue', pkr(rev), 'vs ' + pkr(prevRev) + ' last year', net >= 0)}${yeKpi('Total expenses', pkr(exp), 'vs ' + pkr(prevExp) + ' last year', false)}${yeKpi('Net profit', pkr(net), ((net - prevNet) >= 0 ? '+' : '') + pkr(net - prevNet) + ' vs last year', (net - prevNet) >= 0)}${yeKpi('Avg monthly revenue', pkr(rev / 12), '12-month average', true)}${yeKpi('New members', newJoin, 'joined this year', true)}${yeKpi('Members lost', lost, 'lapsed >60 days', false)}</div><div class="mt-4">${reportTable(['Metric','This year','Last year'], [['Revenue', pkr(rev), pkr(prevRev)], ['Expenses', pkr(exp), pkr(prevExp)], ['Net profit', pkr(net), pkr(prevNet)], ['Profit margin', Math.round(net / rev * 100) + '%', Math.round(prevNet / prevRev * 100) + '%']])}</div>`; }
@@ -551,12 +586,43 @@ function memberOptions(selId) { return members.map(m => `<option value="${m.id}"
 function openPaymentForm(memberId) {
   const m = memberId ? members.find(x => x.id === memberId) : null;
   openSlide('Record payment', `<div class="space-y-4 max-w-md">
-    <div><div class="text-[12px] font-medium text-sub mb-1">Member</div><select id="pf-member" onchange="pfSyncAmount()" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${memberOptions(memberId)}</select></div>
-    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="pf-amount" type="number" value="${m ? TIERS[m.type] : TIERS.Basic}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Find member</div>
+      <div class="flex gap-2">
+        <input id="pf-search" oninput="pfFilter(this.value)" placeholder="Search by name or ID" class="flex-1 rounded-lg border border-line px-3 py-2 text-sm" />
+        ${fpStatus.mode === 'device' ? `<button type="button" id="pf-scan-btn" onclick="pfScanFinger()" class="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-medium hover:bg-gray-50 whitespace-nowrap"><i data-lucide="fingerprint" class="h-4 w-4"></i>Scan finger</button>` : ''}
+      </div>
+    </div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Member</div><select id="pf-member" size="6" onchange="pfSyncAmount()" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${memberOptions(memberId)}</select></div>
+    <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="pf-amount" type="number" value="${m ? TIERS[m.type] : (TIERS.Basic || 0)}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Method</div><select id="pf-method" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${METHODS.map(x => `<option>${x}</option>`).join('')}</select></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Notes (optional)</div><input id="pf-notes" placeholder="e.g. Monthly subscription" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
     <div class="flex gap-2 pt-2"><button onclick="submitPayment()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record payment</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
   </div>`);
+}
+function pfFilter(q) {
+  q = (q || '').trim().toLowerCase();
+  const sel = document.getElementById('pf-member'); if (!sel) return;
+  const cur = sel.value;
+  const filtered = members.filter(mm => !q || mm.name.toLowerCase().includes(q) || mm.id.toLowerCase().includes(q));
+  sel.innerHTML = filtered.map(mm => `<option value="${mm.id}" ${cur === mm.id ? 'selected' : ''}>${mm.name} · ${mm.id}</option>`).join('');
+  if (filtered.length === 1) { sel.value = filtered[0].id; pfSyncAmount(); }
+}
+async function pfScanFinger() {
+  const btn = document.getElementById('pf-scan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+  try {
+    const r = await api('/fingerprint/lookup', { method: 'POST' });
+    if (r.member) {
+      const mm = reviveMember(r.member); upsertMember(mm);
+      const sel = document.getElementById('pf-member');
+      if (sel) {
+        if (![].slice.call(sel.options).some(o => o.value === mm.id)) { const o = document.createElement('option'); o.value = mm.id; o.textContent = mm.name + ' · ' + mm.id; sel.insertBefore(o, sel.firstChild); }
+        sel.value = mm.id; pfSyncAmount();
+      }
+      toast('Matched: ' + mm.name);
+    } else { toast(r.timeout ? 'No finger detected — try again' : 'Fingerprint not recognised'); }
+  } catch (e) { toast(e.message); }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="fingerprint" class="h-4 w-4"></i>Scan finger'; if (window.lucide) lucide.createIcons(); }
 }
 function pfSyncAmount() { const id = document.getElementById('pf-member').value; const m = members.find(x => x.id === id); if (m) document.getElementById('pf-amount').value = TIERS[m.type]; }
 async function recordPaymentFor(m, amount, method, notes) {
@@ -569,12 +635,36 @@ async function submitPayment() {
   try { await recordPaymentFor(m, amt, method, notes); closeSlide(); render(); } catch (e) { toast(e.message); }
 }
 function openExpenseForm() {
+  const paidThisMonth = (s) => expenses.some(e => e.category === 'Salaries' && monthKey(e.date) === monthKey(TODAY) && (e.description || '').includes(s.name));
+  const rows = staff.filter(s => s.salary > 0).map(s => {
+    const paid = paidThisMonth(s);
+    return `<div class="flex items-center justify-between rounded-lg border border-line px-3 py-2.5">
+      <span class="flex items-center gap-2.5">${avatar(s.name, 30)}<span><span class="block font-medium text-sm">${s.name}</span><span class="block text-[11px] text-sub">${s.role} · ${pkr(s.salary)}/mo</span></span></span>
+      ${paid ? '<span class="inline-flex items-center gap-1 rounded-md bg-green-100 px-2.5 py-1 text-[12px] font-semibold text-green-800"><i data-lucide="check" class="h-3.5 w-3.5"></i>Paid this month</span>' : `<button onclick="payStaffSalary('${s.id}')" class="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover">Pay salary</button>`}
+    </div>`;
+  }).join('');
+  openSlide('Record expense', `<div class="space-y-4">
+    <div class="text-[12px] font-medium text-sub">Staff salaries · ${fmtMonth(TODAY)}</div>
+    <div class="space-y-2">${rows || emptyState('users', 'No staff added yet — add them in the Staff tab')}</div>
+    <div class="border-t border-line pt-3"><button onclick="openExpenseManual()" class="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50"><i data-lucide="plus" class="h-4 w-4"></i>Record a different expense manually</button></div>
+  </div>`);
+}
+async function payStaffSalary(staffId) {
+  const s = staff.find(x => x.id === staffId); if (!s) return;
+  try {
+    const e = reviveExpense(await api('/expenses', { method: 'POST', body: { category: 'Salaries', amount: s.salary, description: 'Salary — ' + s.name + ' (' + s.role + ')', date: fmtDate(TODAY), recordedBy: ROLE_USER[state.role] } }));
+    expenses.unshift(e); expenses.sort((a, b) => b.date - a.date);
+    toast("Paid " + s.name + "'s salary · " + pkr(s.salary));
+    render(); openExpenseForm();
+  } catch (err) { toast(err.message); }
+}
+function openExpenseManual() {
   openSlide('Record expense', `<div class="space-y-4 max-w-md">
     <div><div class="text-[12px] font-medium text-sub mb-1">Category</div><select id="ef-cat" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Rent','Salaries','Utilities','Equipment','Supplies','Marketing','Maintenance','Other'].map(c => `<option>${c}</option>`).join('')}</select></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Amount (PKR)</div><input id="ef-amount" type="number" value="10000" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Description</div><input id="ef-desc" placeholder="e.g. Treadmill belt service" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Date</div><input id="ef-date" type="date" value="${fmtDate(TODAY)}" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
-    <div class="flex gap-2 pt-2"><button onclick="submitExpense()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record expense</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitExpense()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Record expense</button><button onclick="openExpenseForm()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Back</button></div>
   </div>`);
 }
 async function submitExpense() {
@@ -613,17 +703,22 @@ async function submitEditMember(id) {
   try { const m = reviveMember(await api('/members/' + id, { method: 'PUT', body: { name, phone, type } })); upsertMember(m); toast('Member updated'); render(); openMember(id); } catch (e) { toast(e.message); }
 }
 function openAddStaff() {
+  enroll = { samples: 0, reading: false, target: '__newstaff__', sessionId: null, kind: 'staff' };
+  startEnrollSession();
   openSlide('Add staff', `<div class="space-y-4 max-w-md">
     <div><div class="text-[12px] font-medium text-sub mb-1">Name</div><input id="as-name" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="Full name" /></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Role</div><select id="as-role" class="w-full rounded-lg border border-line px-3 py-2 text-sm">${['Receptionist','Trainer','Cleaner','Owner'].map(r => `<option>${r}</option>`).join('')}</select></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Phone</div><input id="as-phone" class="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="+92 3xx xxxxxxx" /></div>
     <div><div class="text-[12px] font-medium text-sub mb-1">Monthly salary (PKR)</div><input id="as-salary" type="number" value="30000" class="w-full rounded-lg border border-line px-3 py-2 text-sm" /></div>
-    <div class="flex gap-2 pt-2"><button onclick="submitStaff()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add staff</button><button onclick="closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
+    <div><div class="flex items-center justify-between mb-1"><div class="text-[12px] font-medium text-sub">Fingerprint enrollment <span class="font-normal">(optional)</span></div><div class="text-[11px] text-sub">${ENROLL_SAMPLES} samples${fpStatus.mode === 'device' ? '' : ' · simulated'}</div></div><div id="enroll-area" class="rounded-lg border border-line p-4">${renderEnroll()}</div></div>
+    <div class="flex gap-2 pt-2"><button onclick="submitStaff()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Add staff</button><button onclick="cancelEnrollSession();closeSlide()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button></div>
   </div>`);
 }
 async function submitStaff() {
   const name = (document.getElementById('as-name').value || '').trim(); if (!name) { toast('Enter a staff name'); return; }
-  try { const s = await api('/staff', { method: 'POST', body: { name, role: document.getElementById('as-role').value, phone: document.getElementById('as-phone').value, salary: Number(document.getElementById('as-salary').value) } }); staff.push(s); closeSlide(); toast(name + ' added to staff'); render(); } catch (e) { toast(e.message); }
+  const body = { name, role: document.getElementById('as-role').value, phone: document.getElementById('as-phone').value, salary: Number(document.getElementById('as-salary').value) };
+  if (enroll.samples >= ENROLL_SAMPLES && enroll.sessionId) body.enrollSessionId = enroll.sessionId;
+  try { const s = await api('/staff', { method: 'POST', body }); staff.push(s); closeSlide(); toast(name + ' added to staff' + (s.fingerprint ? ' · fingerprint enrolled' : '')); render(); } catch (e) { toast(e.message); }
 }
 function openAddUser() {
   openSlide('Add user', `<div class="space-y-4 max-w-md">
@@ -641,6 +736,26 @@ async function submitUser() {
 /* settings actions */
 async function saveGymDetails() {
   try { GYM = await api('/settings/gym', { method: 'PUT', body: { name: document.getElementById('set-name').value, address: document.getElementById('set-addr').value, city: document.getElementById('set-city').value, phone: document.getElementById('set-phone').value } }); document.title = GYM.name + ' — Management System'; toast('Gym details saved'); render(); } catch (e) { toast(e.message); }
+}
+function logoArea() {
+  if (LOGO) return `<div class="flex items-center gap-3"><img src="${LOGO}" class="h-16 w-16 rounded-lg border border-line object-cover" /><div class="flex gap-2"><button onclick="pickLogo()" class="rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium hover:bg-gray-50">Change</button><button onclick="removeLogo()" class="rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-red-600 hover:bg-red-50">Remove</button></div></div>`;
+  return `<button onclick="pickLogo()" class="flex h-20 w-full items-center justify-center rounded-lg border border-dashed border-line text-[12px] text-sub hover:bg-gray-50">Click to upload a logo (PNG or JPG)</button>`;
+}
+function pickLogo() { const f = document.getElementById('logo-file'); if (f) f.click(); }
+function onLogoFile(input) {
+  const file = input.files && input.files[0]; if (!file) { return; }
+  if (file.size > 500 * 1024) { toast('Image is too large — please use one under 500 KB'); input.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try { const r = await api('/settings/logo', { method: 'PUT', body: { logo: reader.result } }); LOGO = r.logo; const a = document.getElementById('logo-area'); if (a) a.innerHTML = logoArea(); render(); toast('Logo updated'); }
+    catch (e) { toast(e.message); }
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+async function removeLogo() {
+  try { await api('/settings/logo', { method: 'PUT', body: { logo: null } }); LOGO = null; const a = document.getElementById('logo-area'); if (a) a.innerHTML = logoArea(); render(); toast('Logo removed'); }
+  catch (e) { toast(e.message); }
 }
 async function saveTiers() {
   const body = {}; TIER_NAMES.forEach(t => { body[t] = Number(document.getElementById('tier-' + t).value); });
@@ -697,16 +812,26 @@ async function captureSample() {
   catch (e) { toast(e.message); }
   enroll.reading = false; refreshEnroll();
 }
-function resetEnroll() { cancelEnrollSession(); enroll = { samples: 0, reading: false, target: enroll.target, sessionId: null }; startEnrollSession(); refreshEnroll(); }
-function openEnroll(memberId) {
-  enroll = { samples: 0, reading: false, target: memberId, sessionId: null }; startEnrollSession();
-  const m = members.find(x => x.id === memberId);
-  openModal(`<div class="w-[420px] rounded-xl bg-white p-6 shadow-2xl"><div class="flex items-center justify-between mb-1"><h3 class="text-base font-semibold">${m && m.fingerprint ? 'Re-enroll' : 'Enroll'} fingerprint</h3><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg p-1.5 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><p class="text-[13px] text-sub mb-4">${m ? m.name + ' · ' + m.id : ''}</p><div id="enroll-area" class="rounded-lg border border-line p-4">${renderEnroll()}</div><div class="mt-5 flex justify-end gap-2"><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button><button onclick="saveEnroll()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save fingerprint</button></div></div>`);
+function resetEnroll() { cancelEnrollSession(); enroll = { samples: 0, reading: false, target: enroll.target, kind: enroll.kind, sessionId: null }; startEnrollSession(); refreshEnroll(); }
+function openEnroll(target, kind) {
+  kind = kind || 'member';
+  enroll = { samples: 0, reading: false, target: target, kind: kind, sessionId: null }; startEnrollSession();
+  const subject = kind === 'staff' ? staff.find(x => x.id === target) : members.find(x => x.id === target);
+  const already = subject && subject.fingerprint;
+  openModal(`<div class="w-[420px] rounded-xl bg-white p-6 shadow-2xl"><div class="flex items-center justify-between mb-1"><h3 class="text-base font-semibold">${already ? 'Re-enroll' : 'Enroll'} fingerprint</h3><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg p-1.5 hover:bg-gray-100"><i data-lucide="x" class="h-5 w-5"></i></button></div><p class="text-[13px] text-sub mb-4">${subject ? subject.name + ' · ' + subject.id : ''}</p><div id="enroll-area" class="rounded-lg border border-line p-4">${renderEnroll()}</div><div class="mt-5 flex justify-end gap-2"><button onclick="cancelEnrollSession();closeModal()" class="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button><button onclick="saveEnroll()" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover">Save fingerprint</button></div></div>`);
 }
 async function saveEnroll() {
   if (enroll.samples < ENROLL_SAMPLES) { toast('Capture all ' + ENROLL_SAMPLES + ' samples first'); return; }
-  try { const r = await api('/fingerprint/enroll/commit', { method: 'POST', body: { sessionId: enroll.sessionId, memberId: enroll.target } }); if (r.member) upsertMember(reviveMember(r.member)); closeModal(); toast('Fingerprint enrolled'); render(); if (members.find(x => x.id === enroll.target)) openMember(enroll.target); }
-  catch (e) { toast(e.message); }
+  const kind = enroll.kind || 'member';
+  try {
+    const body = kind === 'staff' ? { sessionId: enroll.sessionId, kind: 'staff', id: enroll.target } : { sessionId: enroll.sessionId, memberId: enroll.target };
+    const r = await api('/fingerprint/enroll/commit', { method: 'POST', body });
+    if (r.member) upsertMember(reviveMember(r.member));
+    if (r.staff) { const i = staff.findIndex(x => x.id === r.staff.id); if (i >= 0) staff[i] = r.staff; else staff.push(r.staff); }
+    closeModal(); toast('Fingerprint enrolled'); render();
+    if (kind === 'staff') { if (staff.find(x => x.id === enroll.target)) openStaff(enroll.target); }
+    else if (members.find(x => x.id === enroll.target)) openMember(enroll.target);
+  } catch (e) { toast(e.message); }
 }
 
 /* ---- receipt ---- */
@@ -750,9 +875,16 @@ function connectWS() {
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (msg.type === 'scan' && msg.member) {
-        const m = reviveMember(msg.member); upsertMember(m); if (msg.checkin) checkins.unshift(reviveCheckin(msg.checkin));
-        if (state.page === 'scan') { scanState = { member: m, mode: 'member' }; refreshScan(); ding(statusOf(m) === 'Paid'); }
+        const m = reviveMember(msg.member); upsertMember(m);
+        let when = '';
+        if (msg.checkin) { const c = reviveCheckin(msg.checkin); checkins.unshift(c); when = fmtTime(c.at); }
+        if (state.page === 'scan') { scanState = { member: m, mode: 'member', checkedIn: true, checkinTime: when }; refreshScan(); ding(statusOf(m) === 'Paid'); }
         else if (state.page === 'dashboard') render();
+      } else if (msg.type === 'staff-scan' && msg.staff) {
+        const i = staff.findIndex(x => x.id === msg.staff.id); if (i >= 0) staff[i] = msg.staff; else staff.push(msg.staff);
+        let when = '';
+        if (msg.attendance) { const c = { at: dTime(msg.attendance.at), staffId: msg.attendance.staffId, staffName: msg.attendance.staffName }; staffCheckins.unshift(c); when = fmtTime(c.at); }
+        if (state.page === 'scan') { scanState = { staff: msg.staff, mode: 'staff', checkinTime: when }; refreshScan(); ding(true); }
       } else if (msg.type === 'scan-unknown') {
         if (state.page === 'scan') { scanState = { mode: 'unknown' }; refreshScan(); ding(false); }
       }

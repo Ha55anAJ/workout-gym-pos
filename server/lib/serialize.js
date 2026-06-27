@@ -19,7 +19,11 @@ function expenseOut(r) {
   return { id: r.code, date: r.date, category: r.category, description: r.description, amount: r.amount, recordedBy: r.recorded_by };
 }
 function staffOut(r) {
-  return { id: r.code, name: r.name, role: r.role, phone: r.phone, salary: r.salary, status: r.status, join: r.join_date };
+  return { id: r.code, fid: r.id, name: r.name, role: r.role, phone: r.phone, salary: r.salary, status: r.status, join: r.join_date,
+    fingerprint: !!r.fingerprint, fingerprintSamples: r.fp_samples || 0, fingerprintEnrolledAt: r.fp_enrolled_at || null };
+}
+function staffCheckinOut(r) {
+  return { at: r.at, staffId: r.staff_code, staffName: r.staff_name };
 }
 function userOut(r) {
   return { name: r.name, role: r.role, email: r.email, last: r.last_login };
@@ -28,4 +32,4 @@ function checkinOut(r) {
   return { at: r.at, memberId: r.member_code, memberName: r.member_name };
 }
 
-module.exports = { memberOut, paymentOut, expenseOut, staffOut, userOut, checkinOut };
+module.exports = { memberOut, paymentOut, expenseOut, staffOut, userOut, checkinOut, staffCheckinOut };

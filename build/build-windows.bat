@@ -1,9 +1,10 @@
 @echo off
 REM ===========================================================================
 REM  Demo Gym - Windows build kit
-REM  Produces:  dist\app.exe              (the application, no Node needed)
-REM             dist\Demo-Gym-Setup.exe   (installer w/ shortcuts + auto-start)
-REM  Run this ONCE on any Windows 10/11 PC that has Node.js LTS installed.
+REM  Produces:  dist\app.exe              (the app, no Node needed on gym PC)
+REM             dist\Demo-Gym-Setup.exe   (installer: shortcuts + auto-start)
+REM  Run ONCE on a Windows 10/11 PC that has Node.js 20 or 22 LTS installed.
+REM  (Inno Setup 6 is needed only to produce the Setup.exe.)
 REM ===========================================================================
 setlocal enabledelayedexpansion
 cd /d "%~dp0\.."
@@ -13,27 +14,35 @@ echo ===== Demo Gym :: Windows build =====
 echo.
 
 where node >nul 2>nul
-if errorlevel 1 ( echo [X] Node.js not found. Install the LTS from https://nodejs.org then re-run. & pause & exit /b 1 )
+if errorlevel 1 ( echo [X] Node.js not found. Install Node 22 LTS from https://nodejs.org then re-run. & pause & exit /b 1 )
 
-echo [1/5] Installing dependencies (gets Windows-native binaries)...
+REM Match the packaged runtime to the installed Node so the native database
+REM module loads correctly (otherwise app.exe throws ERR_DLOPEN_FAILED).
+for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set NODEMAJOR=%%v
+set TARGET=node%NODEMAJOR%-win-x64
+echo Detected Node v%NODEMAJOR%  ->  building for %TARGET%
+echo.
+
+echo [1/5] Installing dependencies (downloads the correct Windows binaries)...
 call npm install
 if errorlevel 1 ( echo [X] npm install failed. & pause & exit /b 1 )
 
 echo [2/5] Installing the pkg bundler...
-call npm install -g pkg
-if errorlevel 1 ( echo [X] Could not install pkg. & pause & exit /b 1 )
+call npm install -g @yao-pkg/pkg
+if errorlevel 1 ( echo [!] @yao-pkg/pkg install had issues; will try npx at build time. )
 
-echo [3/5] Building app.exe ...
+echo [3/5] Building app.exe for %TARGET% ...
 if not exist dist mkdir dist
-call pkg . --targets node18-win-x64 --output dist\app.exe
-if errorlevel 1 ( echo [X] pkg build failed. & pause & exit /b 1 )
+call pkg . --targets %TARGET% --output dist\app.exe
+if not exist dist\app.exe (
+  echo     retrying via npx...
+  call npx --yes @yao-pkg/pkg . --targets %TARGET% --output dist\app.exe
+)
+if not exist dist\app.exe ( echo [X] Could not build app.exe. Make sure you are on Node 20 or 22 LTS and online. & pause & exit /b 1 )
 
 echo [4/5] Copying native modules next to app.exe ...
-REM better-sqlite3 native addon
 for /r "node_modules\better-sqlite3" %%f in (better_sqlite3.node) do copy /y "%%f" "dist\" >nul 2>nul
-REM koffi native binaries (fingerprint FFI) - copy the whole build tree
 if exist "node_modules\koffi\build" xcopy /e /i /y "node_modules\koffi\build" "dist\build" >nul 2>nul
-REM hidden launcher used for boot auto-start
 copy /y "build\run-hidden.vbs" "dist\" >nul 2>nul
 
 echo [5/5] Building the installer (Setup.exe) ...
@@ -42,11 +51,11 @@ if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86
 if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
 if defined ISCC (
   "!ISCC!" "build\installer.iss"
-  if errorlevel 1 ( echo [!] Installer compile failed - see messages above. ) else ( echo     Installer built. )
+  if exist "dist\Demo-Gym-Setup.exe" ( echo     Installer built: dist\Demo-Gym-Setup.exe ) else ( echo [!] Installer compile reported a problem - see messages above. )
 ) else (
   echo [!] Inno Setup 6 not found.
-  echo     Install it once from https://jrsoftware.org/isdl.php and re-run,
-  echo     or open build\installer.iss in Inno Setup and click Compile.
+  echo     Install it from https://jrsoftware.org/isdl.php and re-run this script,
+  echo     OR open build\installer.iss in Inno Setup and press F9 to compile.
 )
 
 echo.
@@ -54,6 +63,6 @@ echo ===== Done =====
 echo   App:        dist\app.exe
 echo   Installer:  dist\Demo-Gym-Setup.exe   (if Inno Setup was available)
 echo.
-echo Test app.exe by double-clicking it. Hand the gym the Setup.exe.
+echo Tip: double-click dist\app.exe to test it before handing over the Setup.exe.
 echo.
 pause

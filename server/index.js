@@ -15,8 +15,17 @@ const db = require('./db');
 const seed = require('./seed');
 const routes = require('./routes');
 const S = require('./lib/serialize');
-const { logCheckin } = require('./lib/checkin');
+const { logCheckin, logStaffCheckin } = require('./lib/checkin');
 const fp = require('./services/fingerprint');
+
+// Never let a stray error take the server down (otherwise the UI shows 'failed to fetch').
+function logErr(tag, e) {
+  const line = '[' + new Date().toISOString() + '] ' + tag + ' ' + ((e && e.stack) || e) + '\n';
+  try { console.error(line.trim()); } catch (_) {}
+  try { fs.appendFileSync(path.join(cfg.dataHome, 'error.log'), line); } catch (_) {}
+}
+process.on('uncaughtException', (e) => logErr('[uncaught]', e));
+process.on('unhandledRejection', (e) => logErr('[unhandledRejection]', e));
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -39,13 +48,13 @@ function broadcast(obj) {
   const msg = JSON.stringify(obj);
   wss.clients.forEach((c) => { if (c.readyState === 1) { try { c.send(msg); } catch (e) {} } });
 }
-wss.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'hello', fingerprint: fp.status() })); });
+wss.on('connection', (ws) => { ws.on('error', () => {}); try { ws.send(JSON.stringify({ type: 'hello', fingerprint: fp.status() })); } catch (e) {} });
 wss.on('error', onFatalListen);
 
 // If the port is taken, another copy is already running: open the browser to it and exit.
 function onFatalListen(e) {
-  if (e && e.code === 'EADDRINUSE') { console.log('Demo Gym is already running — opening the browser.'); openBrowser('http://localhost:' + cfg.port); process.exit(0); }
-  console.error(e); process.exit(1);
+  if (e && e.code === 'EADDRINUSE') { console.log('Demo Gym is already running — opening the browser.'); openBrowser('http://127.0.0.1:' + cfg.port); process.exit(0); }
+  logErr('[server-error]', e); // log but keep running — never kill the server
 }
 
 // A real finger seen by the reader -> record attendance + notify the UI.
@@ -53,18 +62,22 @@ fp.on('scan', (evt) => {
   if (evt && evt.member) {
     const checkin = logCheckin(evt.member);
     broadcast({ type: 'scan', member: S.memberOut(evt.member), checkin, score: evt.score });
+  } else if (evt && evt.staff) {
+    const attendance = logStaffCheckin(evt.staff);
+    broadcast({ type: 'staff-scan', staff: S.staffOut(evt.staff), attendance, score: evt.score });
   } else {
     broadcast({ type: 'scan-unknown' });
   }
 });
 
 async function start() {
-  const seeded = seed.seedIfEmpty();
-  if (seeded) console.log('[db] seeded fresh database with demo data');
-  const status = await fp.init();
-  console.log('[fingerprint] mode:', status.mode, '| device:', status.device);
+  await db.init();
+  try { if (seed.seedIfEmpty()) console.log('[db] initialised a clean install'); }
+  catch (e) { logErr('[db-seed]', e); }
+  try { const status = await fp.init(); console.log('[fingerprint] mode:', status.mode, '| device:', status.device); }
+  catch (e) { logErr('[fingerprint-init]', e); }
 
-  const url = 'http://localhost:' + cfg.port;
+  const url = 'http://127.0.0.1:' + cfg.port;
   const noOpen = process.argv.includes('--no-open') || !cfg.openBrowser;
 
   server.on('error', onFatalListen); // handle "port in use" gracefully

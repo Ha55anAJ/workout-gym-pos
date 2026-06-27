@@ -30,7 +30,7 @@ function nextCode(prefix, table, width) {
   rows.forEach((r) => { const n = parseInt(String(r.code).slice(prefix.length), 10); if (n > max) max = n; });
   return prefix + String(max + 1).padStart(width, '0');
 }
-const actorOf = (req) => (req.body && (req.body.recordedBy || req.body.actor)) || 'Faisal Tariq';
+const actorOf = (req) => (req.body && (req.body.recordedBy || req.body.actor)) || 'Owner';
 const today = () => U.fmtDate(new Date());
 const wrap = (fn) => (req, res) => { try { fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); } };
 const wrapA = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); } };
@@ -45,7 +45,8 @@ router.get('/bootstrap', (req, res) => {
       gym: getSetting('gym', {}),
       tiers: getSetting('tiers', {}),
       policy: getSetting('policy', { cycleDays: 30, dueSoonDays: 5 }),
-      version: getSetting('version', '1.0.0')
+      version: getSetting('version', '1.0.0'),
+      logo: getSetting('logo', null)
     },
     fingerprint: fp.status(),
     members: db.prepare('SELECT * FROM members ORDER BY id').all().map(S.memberOut),
@@ -53,18 +54,19 @@ router.get('/bootstrap', (req, res) => {
     expenses: db.prepare('SELECT * FROM expenses ORDER BY date DESC, id DESC').all().map(S.expenseOut),
     staff: db.prepare('SELECT * FROM staff ORDER BY id').all().map(S.staffOut),
     users: db.prepare('SELECT * FROM users ORDER BY id').all().map(S.userOut),
-    checkins: db.prepare('SELECT * FROM checkins ORDER BY at DESC').all().map(S.checkinOut)
+    checkins: db.prepare('SELECT * FROM checkins ORDER BY at DESC').all().map(S.checkinOut),
+    staffCheckins: db.prepare('SELECT * FROM staff_checkins ORDER BY at DESC').all().map(S.staffCheckinOut)
   });
 });
 
 /* members ----------------------------------------------------------------- */
-router.post('/members', wrap((req, res) => {
+router.post('/members', wrapA(async (req, res) => {
   const { name, phone, type, enrollSessionId } = req.body || {};
   if (!name) throw new Error('name is required');
   const code = nextCode('A', 'members', 3);
   db.prepare('INSERT INTO members(code,name,phone,type,join_date,last_payment,suspended,fingerprint,fp_samples,fp_enrolled_at) VALUES (?,?,?,?,?,?,0,0,0,NULL)')
     .run(code, name, phone || '', type || 'Basic', today(), null);
-  if (enrollSessionId) { try { fp.commitEnroll(enrollSessionId, code); } catch (e) { /* keep member, fingerprint pending */ } }
+  if (enrollSessionId) { try { await fp.commitEnroll(enrollSessionId, code); } catch (e) { /* keep member, fingerprint pending */ } }
   res.json(S.memberOut(db.prepare('SELECT * FROM members WHERE code=?').get(code)));
 }));
 
@@ -110,22 +112,31 @@ router.post('/expenses', wrap((req, res) => {
 }));
 
 /* staff ------------------------------------------------------------------- */
-router.post('/staff', wrap((req, res) => {
-  const { name, role, phone, salary } = req.body || {};
+router.post('/staff', wrapA(async (req, res) => {
+  const { name, role, phone, salary, status, enrollSessionId } = req.body || {};
   if (!name) throw new Error('name is required');
   const code = nextCode('S', 'staff', 2);
   db.prepare('INSERT INTO staff(code,name,role,phone,salary,status,join_date) VALUES (?,?,?,?,?,?,?)')
-    .run(code, name, role || 'Receptionist', phone || '', Math.round(Number(salary) || 0), 'active', today());
+    .run(code, name, role || 'Receptionist', phone || '', Math.round(Number(salary) || 0), status || 'active', today());
+  if (enrollSessionId) { try { await fp.commitEnroll(enrollSessionId, 'staff', code); } catch (e) { /* keep staff, fingerprint pending */ } }
   res.json(S.staffOut(db.prepare('SELECT * FROM staff WHERE code=?').get(code)));
+}));
+router.put('/staff/:code', wrap((req, res) => {
+  const s = db.prepare('SELECT * FROM staff WHERE code=?').get(req.params.code);
+  if (!s) throw new Error('staff not found');
+  const { name, role, phone, salary, status } = req.body || {};
+  db.prepare('UPDATE staff SET name=?, role=?, phone=?, salary=?, status=? WHERE id=?')
+    .run(name || s.name, role || s.role, phone != null ? phone : s.phone, salary != null ? Math.round(Number(salary) || 0) : s.salary, status || s.status, s.id);
+  res.json(S.staffOut(db.prepare('SELECT * FROM staff WHERE id=?').get(s.id)));
 }));
 
 /* users ------------------------------------------------------------------- */
 router.post('/users', wrap((req, res) => {
   const { name, role, email } = req.body || {};
   if (!name) throw new Error('name is required');
-  const info = db.prepare('INSERT INTO users(name,role,email,last_login) VALUES (?,?,?,?)')
-    .run(name, role || 'Receptionist', email || '', today());
-  res.json(S.userOut(db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid)));
+  const r = role || 'Receptionist', em = email || '', d = today();
+  db.prepare('INSERT INTO users(name,role,email,last_login) VALUES (?,?,?,?)').run(name, r, em, d);
+  res.json(S.userOut({ name, role: r, email: em, last_login: d }));
 }));
 
 /* settings ---------------------------------------------------------------- */
@@ -143,6 +154,12 @@ router.put('/settings/policy', wrap((req, res) => {
   const policy = { cycleDays: Math.round(Number((req.body || {}).cycleDays) || cur.cycleDays), dueSoonDays: Math.round(Number((req.body || {}).dueSoonDays) || cur.dueSoonDays) };
   setSetting('policy', policy); res.json(policy);
 }));
+router.put('/settings/logo', wrap((req, res) => {
+  const logo = (req.body || {}).logo || null;   // a data: URL, or null to clear
+  if (logo && logo.length > 800000) throw new Error('logo image is too large (keep it under ~500 KB)');
+  setSetting('logo', logo);
+  res.json({ logo });
+}));
 
 /* check-ins --------------------------------------------------------------- */
 router.post('/checkins', wrap((req, res) => {
@@ -155,16 +172,25 @@ router.post('/checkins', wrap((req, res) => {
 router.get('/fingerprint/status', (req, res) => res.json(fp.status()));
 router.post('/fingerprint/enroll/start', wrap((req, res) => res.json(fp.startEnroll())));
 router.post('/fingerprint/enroll/sample', wrapA(async (req, res) => res.json(await fp.captureSample((req.body || {}).sessionId))));
-router.post('/fingerprint/enroll/commit', wrap((req, res) => {
-  const { sessionId, memberId } = req.body || {};
-  const r = fp.commitEnroll(sessionId, memberId);
-  r.member = S.memberOut(db.prepare('SELECT * FROM members WHERE code=?').get(memberId));
+router.post('/fingerprint/enroll/commit', wrapA(async (req, res) => {
+  const { sessionId, memberId, kind, id } = req.body || {};
+  const k = kind || 'member';
+  const code = id || memberId;
+  const r = await fp.commitEnroll(sessionId, k, code);
+  if (k === 'staff') r.staff = S.staffOut(db.prepare('SELECT * FROM staff WHERE code=?').get(code));
+  else r.member = S.memberOut(db.prepare('SELECT * FROM members WHERE code=?').get(code));
   res.json(r);
 }));
 router.post('/fingerprint/enroll/cancel', wrap((req, res) => { fp.cancelEnroll((req.body || {}).sessionId); res.json({ ok: true }); }));
 router.post('/fingerprint/identify', wrapA(async (req, res) => {
   const r = await fp.identify();
   if (r.member) { r.checkin = logCheckin(r.member); r.member = S.memberOut(r.member); }
+  res.json(r);
+}));
+// Identify a finger WITHOUT recording a check-in (used to look up a member, e.g. in the payment form).
+router.post('/fingerprint/lookup', wrapA(async (req, res) => {
+  const r = await fp.identify();
+  if (r.member) r.member = S.memberOut(r.member);
   res.json(r);
 }));
 router.post('/fingerprint/simulate', wrap((req, res) => {

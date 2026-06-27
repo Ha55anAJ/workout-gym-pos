@@ -12,6 +12,21 @@
 const db = require('./db');
 const U = require('./lib/util');
 
+const CLEAN_SETTINGS = {
+  gym: { name: 'My Gym', address: '', city: '', phone: '', mobile: '', email: '' },
+  tiers: { Basic: 3000, Premium: 5000, Student: 2000, Family: 8000 },
+  policy: { cycleDays: 30, dueSoonDays: 5 },
+  version: '1.0.0'
+};
+function insertSettings(s) {
+  const set = db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)');
+  set.run('gym', JSON.stringify(s.gym));
+  set.run('tiers', JSON.stringify(s.tiers));
+  set.run('policy', JSON.stringify(s.policy));
+  set.run('version', s.version);
+}
+function hasSettings() { return !!db.prepare("SELECT 1 FROM settings WHERE key='gym'").get(); }
+
 const TIERS = { Basic: 3000, Premium: 5000, Student: 2000, Family: 8000 };
 const TIER_NAMES = ['Basic', 'Premium', 'Student', 'Family'];
 const METHODS = ['Cash', 'Card', 'Easypaisa', 'JazzCash'];
@@ -209,23 +224,30 @@ function insertAll(data) {
 }
 
 function seedIfEmpty() {
-  if (!isEmpty()) return false;
-  const data = build();
-  db.transaction(() => insertAll(data))();
+  if (hasSettings()) return false;
+  db.transaction(() => insertSettings(CLEAN_SETTINGS))();
   return true;
 }
 
-function reset() {
+function resetClean() {
+  db.transaction(() => { wipe(); insertSettings(CLEAN_SETTINGS); })();
+}
+
+function loadDemo() {
   const data = build();
   db.transaction(() => { wipe(); insertAll(data); })();
 }
 
-module.exports = { seedIfEmpty, reset, build };
+module.exports = { seedIfEmpty, resetClean, loadDemo, build };
 
 // CLI
 if (require.main === module) {
-  const arg = process.argv[2];
-  if (arg === '--reset') { reset(); console.log('Database reset and re-seeded.'); }
-  else { const did = seedIfEmpty(); console.log(did ? 'Database seeded.' : 'Database already has data — nothing to do (use --reset to wipe).'); }
-  db.close();
+  (async () => {
+    await db.init();
+    const arg = process.argv[2];
+    if (arg === '--demo') { loadDemo(); console.log('Loaded sample demo data.'); }
+    else if (arg === '--reset') { resetClean(); console.log('Reset to a clean, empty install.'); }
+    else { const did = seedIfEmpty(); console.log(did ? 'Initialised a clean install.' : 'Already initialised.'); }
+    db.close();
+  })();
 }

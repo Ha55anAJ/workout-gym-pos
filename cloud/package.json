@@ -1,0 +1,26 @@
+{
+  "name": "gym-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloud API (Express + PostgreSQL) for Demo Gym — analytics + remote controls for the owner. Receives a one-way sync from the gym laptop; never stores biometric data.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node -e \"require('dotenv').config();const d=require('./src/db');const m=require('./src/migrate');d.init();m.run().then(()=>{console.log('migrated');process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})\"",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.5"
+  }
+}

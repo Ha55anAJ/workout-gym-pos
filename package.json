@@ -9,21 +9,28 @@
     "start": "node server/index.js",
     "seed": "node server/seed.js --force",
     "reset": "node server/seed.js --reset",
-    "build:exe": "pkg . --targets node18-win-x64 --output dist/app.exe"
+    "build:exe": "pkg . --targets node22-win-x64 --output dist/app.exe"
   },
   "pkg": {
-    "scripts": ["server/**/*.js"],
-    "assets": ["public/**/*"],
-    "targets": ["node18-win-x64"],
+    "scripts": [
+      "server/**/*.js"
+    ],
+    "assets": [
+      "public/**/*",
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "targets": [
+      "node22-win-x64"
+    ],
     "outputPath": "dist"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0",
     "express": "^4.19.2",
+    "sql.js": "^1.10.0",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
-    "koffi": "^2.9.0"
+    "koffi": "^2.16.2"
   },
   "engines": {
     "node": ">=18"
